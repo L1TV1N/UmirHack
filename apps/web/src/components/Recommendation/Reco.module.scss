@@ -1,0 +1,120 @@
+.item {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr) auto;
+  gap: 4px 16px;
+  align-items: start;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line-soft);
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  @media (max-width: 760px) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.kind {
+  padding-top: 1px;
+}
+
+.what {
+  min-width: 0;
+
+  strong {
+    display: block;
+    font-size: 14px;
+    font-weight: 700;
+  }
+
+  .where {
+    margin-top: 1px;
+    font-size: 12.5px;
+    color: var(--ink-500);
+  }
+
+  .why {
+    margin-top: 6px;
+    color: var(--ink-700);
+    max-width: 78ch;
+  }
+}
+
+.side {
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+
+  @media (max-width: 760px) {
+    align-items: flex-start;
+    text-align: left;
+  }
+}
+
+.money {
+  font-size: 15px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+
+  small {
+    display: block;
+    margin-top: 1px;
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--ink-500);
+  }
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.compact {
+  grid-template-columns: 92px minmax(0, 1fr) auto;
+  padding: 11px 18px;
+  align-items: center;
+
+  .what strong {
+    font-size: 13.5px;
+  }
+
+  .what .where {
+    margin-top: 0;
+  }
+
+  // на телефоне три колонки оставляли тексту около 80 px: тип и срок идут первой строкой, описание под ними
+  @media (max-width: 760px) {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'kind side'
+      'what what';
+    row-gap: 6px;
+
+    .kind {
+      grid-area: kind;
+    }
+
+    .what {
+      grid-area: what;
+    }
+
+    .side {
+      grid-area: side;
+      align-items: flex-end;
+      text-align: right;
+    }
+  }
+}
+
+.dishes {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}

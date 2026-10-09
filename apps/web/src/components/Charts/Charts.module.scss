@@ -1,0 +1,135 @@
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 168px), 1fr));
+  background: var(--white);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.kpi {
+  padding: 14px 16px 13px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  margin: 0 -1px -1px 0;
+  min-width: 0;
+
+  dt {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--ink-500);
+  }
+
+  dd {
+    margin: 6px 0 0;
+  }
+}
+
+.value {
+  display: block;
+  font-size: clamp(20px, 5.4vw, 25px);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.hint {
+  display: block;
+  margin-top: 3px;
+  font-size: 12.5px;
+  color: var(--ink-500);
+}
+
+.danger .value {
+  color: var(--danger-700);
+}
+
+.warn .value {
+  color: var(--warn-700);
+}
+
+.bars {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.barRow {
+  display: grid;
+  grid-template-columns: 74px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.barLabel {
+  font-weight: 600;
+  color: var(--ink-700);
+}
+
+.track {
+  height: 14px;
+  background: var(--surface-100);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  min-width: 2px;
+}
+
+.barValue {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+
+  small {
+    display: block;
+    font-weight: 500;
+    font-size: 11.5px;
+    color: var(--ink-500);
+  }
+}
+
+.chart {
+  display: block;
+  max-width: 100%;
+  overflow: visible;
+}
+
+.axis {
+  font-size: 11px;
+  fill: var(--ink-500);
+  font-family: var(--font);
+}
+
+.legend {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--ink-600);
+
+  span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  i {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    display: inline-block;
+  }
+}

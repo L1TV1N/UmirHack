@@ -1,0 +1,157 @@
+.wrap {
+  overflow-x: auto;
+  background: var(--white);
+
+  // Заголовок залипает, только если прокручивается сама таблица: внутри контейнера с overflow он иначе не залипает.
+  // Короткие таблицы высоту не набирают и не прокручиваются.
+  @media (min-width: 641px) {
+    overflow-y: auto;
+    max-height: calc(100vh - 230px);
+  }
+}
+
+.table {
+  min-width: 100%;
+  font-size: 13.5px;
+
+  th,
+  td {
+    padding: 10px 14px;
+    text-align: left;
+    vertical-align: middle;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding-top: 9px;
+    padding-bottom: 9px;
+    background: var(--surface-50);
+    border-bottom: 1px solid var(--line);
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ink-500);
+    white-space: nowrap;
+  }
+
+  tbody tr:last-child td {
+    border-bottom: none;
+  }
+}
+
+// На телефоне строка превращается в карточку: пять колонок в таблице уходят за край экрана вместе с самым важным.
+// Заголовок остаётся в разметке для скринридеров, а подписи берутся из data-label.
+@media (max-width: 640px) {
+  .table {
+    display: block;
+
+    thead {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+    }
+
+    tbody {
+      display: block;
+    }
+
+    tr {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px 14px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    tbody tr:last-child {
+      border-bottom: none;
+    }
+
+    td {
+      display: block;
+      min-width: 0;
+      padding: 0;
+      border: none;
+      text-align: left !important;
+      overflow-wrap: anywhere;
+    }
+
+    tbody tr:last-child td {
+      border-bottom: none;
+    }
+
+    td:first-child {
+      grid-column: 1 / -1;
+    }
+
+    td[data-label]:not(:first-child)::before {
+      content: attr(data-label);
+      display: block;
+      margin-bottom: 1px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--ink-500);
+    }
+  }
+}
+
+.dense {
+  th,
+  td {
+    padding: 7px 12px;
+  }
+}
+
+.right {
+  text-align: right !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.center {
+  text-align: center !important;
+}
+
+.clickable {
+  cursor: pointer;
+
+  &:hover td {
+    background: var(--surface-50);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--brand-500);
+    outline-offset: -2px;
+  }
+}
+
+.muted td {
+  color: var(--ink-500);
+}
+
+.skeleton {
+  height: 12px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--surface-100) 25%, var(--line-soft) 50%, var(--surface-100) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.2s linear infinite;
+}
+
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--ink-500);
+}

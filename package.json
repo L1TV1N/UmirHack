@@ -1,0 +1,34 @@
+{
+  "name": "zapas",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Учёт остатков, сроков годности и стоп-листов",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm-run-all --parallel dev:server dev:web",
+    "dev:server": "npm run dev -w @zapas/server",
+    "dev:web": "npm run dev -w @zapas/web",
+    "build": "npm run build -w @zapas/web && npm run build -w @zapas/server",
+    "start": "npm run start -w @zapas/server",
+    "migrate": "npm run migrate -w @zapas/server",
+    "seed": "npm run seed -w @zapas/server",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "audit:prod": "npm audit --omit=dev",
+    "create-admin": "npm run create-admin -w @zapas/server"
+  },
+  "devDependencies": {
+    "npm-run-all2": "^8.0.0",
+    "typescript": "^5.9.0"
+  },
+  "overrides": {
+    "esbuild": "^0.28.2"
+  }
+}

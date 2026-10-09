@@ -1,0 +1,142 @@
+.page {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(360px, 5fr) 6fr;
+
+  // на телефоне тёмная шапка занимает ровно свою высоту, остальное отдано форме
+  @media (max-width: 900px) {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+}
+
+.aside {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 40px;
+  padding: 40px 48px;
+  background: var(--ink-900);
+  color: #cbd5e1;
+
+  @media (max-width: 900px) {
+    padding: 24px 24px 28px;
+    gap: 24px;
+  }
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--white);
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.pitch {
+  max-width: 420px;
+
+  h1 {
+    color: var(--white);
+    font-size: 30px;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+  }
+
+  p {
+    margin-top: 14px;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+
+  @media (max-width: 900px) {
+    h1 {
+      font-size: 24px;
+    }
+
+    p {
+      display: none;
+    }
+  }
+}
+
+.facts {
+  margin: 28px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 12px;
+  font-size: 14px;
+
+  li {
+    display: grid;
+    grid-template-columns: 8px 1fr;
+    gap: 12px;
+    align-items: baseline;
+  }
+
+  li::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    background: var(--brand-500);
+  }
+
+  @media (max-width: 900px) {
+    display: none;
+  }
+}
+
+.foot {
+  font-size: 12.5px;
+  color: #7b8798;
+
+  @media (max-width: 900px) {
+    display: none;
+  }
+}
+
+.formSide {
+  display: grid;
+  place-items: center;
+  padding: 32px 24px;
+  background: var(--white);
+}
+
+.form {
+  width: min(380px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+
+  h2 {
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+  }
+
+  > p {
+    margin-top: -8px;
+    color: var(--ink-500);
+  }
+}
+
+.alert {
+  padding: 10px 12px;
+  border: 1px solid var(--danger-200);
+  border-radius: var(--radius);
+  background: var(--danger-50);
+  color: #991b1b;
+  font-weight: 600;
+}
+
+.notice {
+  padding: 10px 12px;
+  border: 1px solid var(--brand-200, #cfd8e8);
+  border-radius: var(--radius);
+  background: var(--brand-50, #eef3fb);
+  color: var(--ink-700);
+  font-weight: 600;
+}

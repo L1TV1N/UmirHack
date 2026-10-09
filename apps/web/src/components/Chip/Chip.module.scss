@@ -1,0 +1,73 @@
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  // длинная причина (например, нехватка ингредиентов) переносится, а не уходит за край экрана
+  max-width: 100%;
+  min-height: 22px;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.neutral {
+  background: var(--surface-100);
+  border-color: var(--line);
+  color: var(--ink-700);
+}
+
+.info {
+  background: var(--brand-50);
+  border-color: var(--brand-200);
+  color: var(--brand-800);
+}
+
+.ok {
+  background: var(--ok-50);
+  border-color: var(--ok-200);
+  color: #166534;
+}
+
+.amber {
+  background: var(--amber-50);
+  border-color: var(--amber-200);
+  color: var(--amber-700);
+}
+
+.warn {
+  background: var(--warn-50);
+  border-color: var(--warn-200);
+  color: #9a3412;
+}
+
+.danger {
+  background: var(--danger-50);
+  border-color: var(--danger-200);
+  color: #991b1b;
+}
+
+.life {
+  display: block;
+  width: 56px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+
+  span {
+    display: block;
+    height: 100%;
+    border-radius: 2px;
+  }
+}

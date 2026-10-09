@@ -1,0 +1,75 @@
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 16px;
+  // без overflow-y: hidden браузер рисует пустую вертикальную полосу прокрутки
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar,
+.segmented::-webkit-scrollbar {
+  display: none;
+}
+
+.tab {
+  position: relative;
+  padding: 10px 14px;
+  border: none;
+  background: transparent;
+  font-weight: 600;
+  color: var(--ink-500);
+  white-space: nowrap;
+
+  &:hover {
+    color: var(--ink-900);
+  }
+
+  &[aria-selected='true'] {
+    color: var(--brand-700);
+
+    &::after {
+      content: '';
+      position: absolute;
+      left: 8px;
+      right: 8px;
+      bottom: 0;
+      height: 2px;
+      background: var(--brand-600);
+    }
+  }
+}
+
+.segmented {
+  display: inline-flex;
+  // на телефоне шесть вкладок не помещаются: прокручиваем внутри, а не выходим за экран
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  padding: 2px;
+  background: var(--surface-100);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.seg {
+  flex: none;
+  white-space: nowrap;
+  height: 28px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-600);
+
+  &[aria-pressed='true'] {
+    background: var(--white);
+    color: var(--ink-900);
+    box-shadow: 0 1px 2px rgba(17, 24, 39, 0.12);
+  }
+}

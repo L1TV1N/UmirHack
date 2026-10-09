@@ -1,0 +1,13 @@
+{
+  "name": "Запас",
+  "short_name": "Запас",
+  "description": "Остатки, сроки годности и стоп-лист",
+  "lang": "ru",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#111827",
+  "theme_color": "#111827",
+  "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

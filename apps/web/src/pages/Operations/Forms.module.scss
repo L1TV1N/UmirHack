@@ -1,0 +1,77 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 18px;
+}
+
+.top {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.lines {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.total {
+  font-weight: 700;
+  font-size: 14px;
+
+  span {
+    font-weight: 500;
+    color: var(--ink-500);
+  }
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  background: var(--warn-50);
+  border: 1px solid var(--warn-200);
+  border-radius: var(--radius);
+  color: #9a3412;
+  font-weight: 600;
+}
+
+.info {
+  padding: 10px 14px;
+  background: var(--brand-50);
+  border: 1px solid var(--brand-200);
+  border-radius: var(--radius);
+  color: var(--brand-900);
+}
+
+.import {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.vsd {
+  display: block;
+  width: min(100%, 330px);
+
+  input {
+    font-size: 13px;
+    font-family: var(--font-mono, ui-monospace, monospace);
+  }
+}

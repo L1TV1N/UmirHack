@@ -1,0 +1,138 @@
+.groups {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  align-items: center;
+  padding: 10px 16px 0;
+}
+
+.sub {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-500);
+}
+
+.reason {
+  color: var(--ink-700);
+  font-size: 13px;
+  max-width: 34ch;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px 16px;
+  margin: 0 0 14px;
+
+  dt {
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ink-500);
+  }
+
+  dd {
+    margin: 2px 0 0;
+    font-weight: 600;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+
+  th {
+    text-align: left;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ink-500);
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  td {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--line-soft);
+    vertical-align: middle;
+  }
+
+  .num,
+  th.num {
+    text-align: right;
+  }
+
+  input {
+    width: 100px;
+    text-align: right;
+  }
+}
+
+.scroll {
+  overflow-x: auto;
+  margin-bottom: 12px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.warn {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--amber-200);
+  border-radius: var(--radius);
+  background: var(--amber-50);
+  color: var(--amber-700);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.note {
+  margin: 8px 0 0;
+  color: var(--ink-600);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.text {
+  margin: 12px 0 0;
+  padding: 12px 14px;
+  background: var(--surface-50);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-family: ui-monospace, monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.close {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin-top: 10px;
+
+  > div {
+    flex: 1;
+    min-width: 220px;
+  }
+}

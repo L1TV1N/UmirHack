@@ -1,0 +1,85 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: zapas_admin
+      POSTGRES_PASSWORD: ${DB_ADMIN_PASSWORD:?Задайте DB_ADMIN_PASSWORD в .env}
+      POSTGRES_DB: zapas
+      DB_OWNER_PASSWORD: ${DB_OWNER_PASSWORD:?Задайте DB_OWNER_PASSWORD в .env}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:?Задайте DB_APP_PASSWORD в .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zapas_admin -d zapas"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://zapas_app:${DB_APP_PASSWORD}@db:5432/zapas
+      MIGRATION_DATABASE_URL: postgres://zapas_owner:${DB_OWNER_PASSWORD}@db:5432/zapas
+      JWT_SECRET: ${JWT_SECRET:?Задайте JWT_SECRET в .env}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      BUSINESS_TZ: ${BUSINESS_TZ:-Europe/Moscow}
+      APP_ORIGINS: ${APP_ORIGINS:-}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      TELEGRAM_COMMANDS: ${TELEGRAM_COMMANDS:-true}
+      SMTP_URL: ${SMTP_URL:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      WEBHOOK_ALLOW_PRIVATE: ${WEBHOOK_ALLOW_PRIVATE:-false}
+      WEBHOOK_ALLOW_HTTP: ${WEBHOOK_ALLOW_HTTP:-false}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      INVOICE_MODEL: ${INVOICE_MODEL:-claude-opus-5-5}
+    ports:
+      - "127.0.0.1:${APP_PORT:-3000}:3000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  # Демо-данные за 60 дней. Запуск: docker compose --profile demo run --rm seed
+  seed:
+    build: .
+    profiles: ["demo"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgres://zapas_app:${DB_APP_PASSWORD}@db:5432/zapas
+      MIGRATION_DATABASE_URL: postgres://zapas_owner:${DB_OWNER_PASSWORD}@db:5432/zapas
+      JWT_SECRET: ${JWT_SECRET:?Задайте JWT_SECRET в .env}
+      BUSINESS_TZ: ${BUSINESS_TZ:-Europe/Moscow}
+    command: ["node", "apps/server/dist/seed-cli.js", "--reset"]
+
+  # Первый администратор на чистой базе (без демо-данных). Запуск: docker compose --profile admin run --rm create-admin
+  # Почту, имя и пароль спросит в терминале, пароль при вводе не показывается.
+  create-admin:
+    build: .
+    profiles: ["admin"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://zapas_app:${DB_APP_PASSWORD}@db:5432/zapas
+      MIGRATION_DATABASE_URL: postgres://zapas_owner:${DB_OWNER_PASSWORD}@db:5432/zapas
+      JWT_SECRET: ${JWT_SECRET:?Задайте JWT_SECRET в .env}
+      BUSINESS_TZ: ${BUSINESS_TZ:-Europe/Moscow}
+    command: ["node", "apps/server/dist/create-admin-cli.js"]
+
+volumes:
+  pgdata:

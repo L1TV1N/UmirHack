@@ -1,0 +1,33 @@
+.reasons {
+  margin: 0;
+  color: var(--ink-700);
+  max-width: 62ch;
+}
+
+.ingredients {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sub {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-500);
+}
+
+.warn {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px 18px;
+}
+
+.kinds {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

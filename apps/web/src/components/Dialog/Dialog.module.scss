@@ -1,0 +1,88 @@
+.dialog {
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-lg);
+  background: var(--white);
+  color: var(--ink-900);
+  box-shadow: var(--shadow-pop);
+  width: min(var(--dialog-width, 520px), calc(100vw - 24px));
+  max-height: calc(100vh - 48px);
+  overflow: visible;
+
+  &::backdrop {
+    background: rgba(17, 24, 39, 0.5);
+  }
+
+  &[open] {
+    display: flex;
+    flex-direction: column;
+    animation: appear 0.14s ease-out;
+  }
+}
+
+@keyframes appear {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--line);
+
+  h2 {
+    font-size: 16px;
+    font-weight: 800;
+  }
+}
+
+.sub {
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--ink-500);
+}
+
+.close {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius);
+  color: var(--ink-500);
+
+  &:hover {
+    background: var(--surface-100);
+    color: var(--ink-900);
+  }
+}
+
+.body {
+  padding: 18px 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+
+  // блоки с overflow: hidden иначе сжимаются до нуля в колонке с прокруткой
+  > * {
+    flex-shrink: 0;
+  }
+}
+
+.foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-50);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}

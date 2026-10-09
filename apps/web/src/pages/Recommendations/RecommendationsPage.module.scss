@@ -1,0 +1,40 @@
+.list {
+  margin: 0;
+  padding: 0;
+}
+
+.how {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 0;
+  margin-bottom: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--white);
+  overflow: hidden;
+
+  div {
+    padding: 12px 16px;
+    border-right: 1px solid var(--line);
+    font-size: 13px;
+    color: var(--ink-600);
+
+    &:last-child {
+      border-right: none;
+    }
+  }
+
+  strong {
+    display: block;
+    margin-bottom: 2px;
+    color: var(--ink-900);
+  }
+}
+
+.more {
+  margin: 0;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--ink-600);
+}

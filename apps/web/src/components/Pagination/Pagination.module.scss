@@ -1,0 +1,16 @@
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 18px;
+  border-top: 1px solid var(--line);
+  background: var(--white);
+  font-size: 13px;
+  color: var(--ink-600);
+}
+
+.buttons {
+  display: flex;
+  gap: 6px;
+}

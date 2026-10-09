@@ -1,0 +1,48 @@
+{
+  "name": "@zapas/server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsup",
+    "start": "node dist/main.js",
+    "migrate": "tsx src/db/migrate-cli.ts",
+    "seed": "tsx src/db/seed/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "create-admin": "tsx src/db/create-admin-cli.ts",
+    "barcodes": "tsx src/db/seed/barcodes-cli.ts",
+    "sample-upd": "tsx src/db/seed/upd-sample-cli.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.132.1",
+    "@fastify/cookie": "^11.1.0",
+    "@fastify/cors": "^11.3.0",
+    "@fastify/helmet": "^13.1.0",
+    "@fastify/rate-limit": "^11.2.0",
+    "@fastify/static": "^10.1.0",
+    "@fastify/swagger": "^9.9.0",
+    "@node-rs/argon2": "^2.2.0",
+    "@zapas/shared": "*",
+    "fast-xml-parser": "^5.11.2",
+    "fastify": "^5.12.0",
+    "fastify-plugin": "^5.1.0",
+    "fastify-type-provider-zod": "^7.0.0",
+    "jose": "^6.2.0",
+    "kysely": "^0.29.0",
+    "nodemailer": "^10.0.16",
+    "openapi-types": "^12.1.3",
+    "pg": "^8.23.0",
+    "zod": "^4.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "@types/nodemailer": "^8.0.2",
+    "@types/pg": "^8.23.0",
+    "bwip-js": "^4.11.4",
+    "tsup": "^8.5.0",
+    "tsx": "^4.23.0",
+    "vitest": "^5.0.0"
+  }
+}

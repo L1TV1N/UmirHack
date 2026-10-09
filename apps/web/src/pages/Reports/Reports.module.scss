@@ -1,0 +1,17 @@
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+  align-items: start;
+
+  > section > div {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    align-items: flex-start;
+  }
+}
+
+.text {
+  color: var(--ink-600);
+}
