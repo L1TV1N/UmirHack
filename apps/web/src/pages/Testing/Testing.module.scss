@@ -141,3 +141,156 @@
     border: 1px solid #999;
   }
 }
+
+// Пакет тестовых накладных
+.samples {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  gap: 14px;
+  padding: 14px;
+}
+
+.sample {
+  display: flex;
+  gap: 14px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--white);
+
+  img,
+  .xmlThumb {
+    flex: none;
+    width: 150px;
+    height: 107px;
+    border-radius: 6px;
+    border: 1px solid var(--line);
+    object-fit: cover;
+    background: var(--surface, #f3f4f6);
+  }
+
+  h3 {
+    margin: 0;
+    font-size: 14px;
+  }
+
+  p,
+  ul {
+    margin: 6px 0 0;
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  ul {
+    padding-left: 18px;
+    color: var(--ink-500);
+  }
+
+  small {
+    color: var(--ink-500);
+    font-size: 12px;
+  }
+}
+
+.xmlThumb {
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: var(--ink-500);
+}
+
+.sampleBody {
+  min-width: 0;
+}
+
+.sampleActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.note {
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--ink-700, var(--ink-500));
+}
+
+.invoiceHead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 32px;
+  margin: 0;
+  padding: 12px 14px;
+
+  dt {
+    font-size: 12px;
+    color: var(--ink-500);
+  }
+
+  dd {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin: 2px 0 0;
+    font-weight: 600;
+  }
+}
+
+.tableScroll {
+  overflow-x: auto;
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  th,
+  td {
+    padding: 9px 14px;
+    border-top: 1px solid var(--line-soft);
+    text-align: left;
+    vertical-align: top;
+    font-size: 13px;
+  }
+
+  th {
+    border-top: none;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink-500);
+  }
+
+  .num {
+    text-align: right;
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 640px) {
+  .samples {
+    grid-template-columns: 1fr;
+  }
+
+  .sample {
+    flex-direction: column;
+
+    img,
+    .xmlThumb {
+      width: 100%;
+      height: auto;
+      aspect-ratio: 7 / 5;
+    }
+  }
+}

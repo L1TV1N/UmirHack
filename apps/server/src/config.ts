@@ -57,9 +57,13 @@ const schema = z.object({
   // Обмен с 1С и iiko: серверы учётных систем чаще всего во внутренней сети. Перечислите их адреса через запятую
   EXCHANGE_ALLOW_HOSTS: z.string().default(''),
 
-  // Распознавание фото накладной через Claude. Без ключа загрузка фото выключена, УПД в XML работает всегда
-  ANTHROPIC_API_KEY: z.string().optional(),
-  INVOICE_MODEL: z.string().default('claude-opus-5-5'),
+  // Фото накладной читает GigaChat. Без ключа кнопки с фото нет, а УПД в XML грузится всегда
+  GIGACHAT_AUTH_KEY: z.string().optional(),
+  GIGACHAT_SCOPE: z.string().default('GIGACHAT_API_PERS'),
+  INVOICE_MODEL: z.string().default('GigaChat-2-Max'),
+  // Сертификаты Сбера подписаны российским корневым, Node его не знает: дайте путь к файлу или отключите проверку
+  GIGACHAT_CA_FILE: z.string().optional(),
+  GIGACHAT_INSECURE_TLS: bool.default(false),
 });
 
 export interface Config {
@@ -87,7 +91,7 @@ export interface Config {
   stopListSyncDelayMs: number;
   /** commands: бот отвечает на команды (опрос Telegram). Выключается, если опрос ведёт другой экземпляр. */
   telegram: { token: string; chatId: string; commands: boolean; proxy: string | null } | null;
-  invoicePhoto: { apiKey: string; model: string } | null;
+  invoicePhoto: { authKey: string; scope: string; model: string; caFile: string | null; insecureTls: boolean } | null;
   webhooks: { allowPrivate: boolean; allowHttp: boolean };
   /** Хосты, которым разрешён обмен по http и во внутренней сети. */
   exchange: { allowHosts: string[] };
@@ -187,7 +191,9 @@ export function parseConfig(source: NodeJS.ProcessEnv = process.env): Config {
     smtp: e.SMTP_URL && e.SMTP_FROM ? { url: e.SMTP_URL, from: e.SMTP_FROM } : null,
     webhooks: { allowPrivate: e.WEBHOOK_ALLOW_PRIVATE, allowHttp: e.WEBHOOK_ALLOW_HTTP ?? !production },
     exchange: { allowHosts: e.EXCHANGE_ALLOW_HOSTS.split(',').map((h) => h.trim()).filter(Boolean) },
-    invoicePhoto: e.ANTHROPIC_API_KEY ? { apiKey: e.ANTHROPIC_API_KEY, model: e.INVOICE_MODEL } : null,
+    invoicePhoto: e.GIGACHAT_AUTH_KEY
+      ? { authKey: e.GIGACHAT_AUTH_KEY, scope: e.GIGACHAT_SCOPE, model: e.INVOICE_MODEL, caFile: e.GIGACHAT_CA_FILE || null, insecureTls: e.GIGACHAT_INSECURE_TLS }
+      : null,
     telegram:
       e.TELEGRAM_BOT_TOKEN && e.TELEGRAM_CHAT_ID
         ? { token: e.TELEGRAM_BOT_TOKEN, chatId: e.TELEGRAM_CHAT_ID, commands: e.TELEGRAM_COMMANDS ?? e.NODE_ENV !== 'test', proxy: e.TELEGRAM_PROXY_URL || null }

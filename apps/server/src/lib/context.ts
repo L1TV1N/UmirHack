@@ -24,7 +24,7 @@ export interface Deps {
   notifier: Notifier;
   /** Клиент Telegram для бота с командами. Нет: бот выключен. */
   telegram?: TelegramApi | null;
-  /** Чтение накладных с фото (нужен ключ ИИ-сервиса). Нет: загрузка фото выключена. */
+  /** Чтение накладных с фото (нужен ключ GigaChat). Если его нет, загрузка фото выключена. */
   invoiceReader?: InvoiceReader | null;
   /** Отправка вебхуков. Нет: события копятся в очереди, но не уходят. */
   webhookSender?: WebhookSender | null;

@@ -34,7 +34,7 @@ export function HotDishItem({ dish, compact }: { dish: HotDishDto; compact?: boo
                 {!compact && (
                   <>
                     {' '}
-                    · в ближайших партиях {formatQty(r.stockQty, r.unit)} · {formatQty(r.perPortion, r.unit)} на порцию
+                    · в истекающих партиях {formatQty(r.stockQty, r.unit)} · {formatQty(r.perPortion, r.unit)} на порцию
                     {r.sharedWith.length > 0 && <> · делится с «{r.sharedWith.slice(0, 2).join('», «')}»</>}
                   </>
                 )}

@@ -3,7 +3,7 @@ import { createDb } from './db/client';
 import { buildApp } from './app';
 import { NoopNotifier, TelegramNotifier } from './modules/notifications/notifier';
 import { startScheduler } from './modules/notifications/scheduler';
-import { ClaudeInvoiceReader } from './modules/invoices/reader';
+import { GigaChatInvoiceReader } from './modules/invoices/reader';
 import { HttpWebhookSender } from './modules/integrations/sender';
 import { startWebhookWorker } from './modules/integrations/service';
 import { HttpExchangeTransport } from './modules/exchange/transport';
@@ -25,7 +25,7 @@ const notifier = config.telegram
   : new NoopNotifier();
 
 const telegram = config.telegram?.commands ? new HttpTelegramApi(config.telegram.token, telegramFetch) : null;
-const invoiceReader = config.invoicePhoto ? new ClaudeInvoiceReader(config.invoicePhoto.apiKey, config.invoicePhoto.model) : null;
+const invoiceReader = config.invoicePhoto ? new GigaChatInvoiceReader(config.invoicePhoto) : null;
 const webhookSender = new HttpWebhookSender({ allowPrivate: config.webhooks.allowPrivate });
 const exchangeTransport = new HttpExchangeTransport({ allowHosts: config.exchange.allowHosts });
 const mailer = config.smtp ? new SmtpMailer(config.smtp.url, config.smtp.from) : null;

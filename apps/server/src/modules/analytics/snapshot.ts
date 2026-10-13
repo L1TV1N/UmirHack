@@ -31,6 +31,8 @@ export interface Snapshot {
   tracked: Set<string>;
   dishes: SnapshotDish[];
   velocities: Map<string, RecVelocity>;
+  /** Сколько порций блюда продаётся в сутки: ключи dishId|locationId. */
+  dishDemand: Map<string, RecVelocity>;
   stock: Map<string, StockPoint>;
 }
 
@@ -181,7 +183,42 @@ export async function loadSnapshot(deps: Deps, locationIds: string[] | null): Pr
     items: itemRows.filter((i) => i.dish_id === d.id).map((i) => ({ productId: i.product_id, qtyMilli: toMilli(Number(i.quantity)) })),
   }));
 
-  return { seq, today, settings, locations, products, batches, tracked, dishes, velocities, stock };
+  // Порции блюд: по расходу ингредиентов под этим блюдом. Через каждый ингредиент выходит одно и то же число порций,
+  // берём середину, чтобы случайная правка рецептуры одного продукта не искажала результат
+  const dishDemand = new Map<string, RecVelocity>();
+  if (dishes.length > 0) {
+    const dishSums = await sql<{ dish_id: string; location_id: string; product_id: string; wsum: string }>`
+      SELECT dish_id, location_id, product_id,
+             SUM(-quantity * CASE WHEN (${today}::date - 1) - (created_at AT TIME ZONE ${tz})::date < 7 THEN 2 ELSE 1 END) AS wsum
+      FROM stock_movements
+      WHERE type = 'sale' AND dish_id IS NOT NULL
+        AND created_at >= ((${from}::date)::timestamp AT TIME ZONE ${tz})
+        AND created_at < ((${today}::date)::timestamp AT TIME ZONE ${tz})
+        ${scope !== null ? sql`AND location_id IN (${sql.join(scope.map((id) => sql`${id}::uuid`))})` : sql``}
+      GROUP BY dish_id, location_id, product_id`.execute(db);
+    const recipe = new Map<string, number>();
+    for (const d of dishes) for (const i of d.items) recipe.set(`${d.id}|${i.productId}`, (recipe.get(`${d.id}|${i.productId}`) ?? 0) + i.qtyMilli / 1000);
+    const since = new Map(pairRows.map((r) => [stockKey(r.product_id, r.location_id), String(r.since)]));
+    const perDish = new Map<string, { portions: number[]; since: string | null }>();
+    for (const r of dishSums.rows) {
+      const perPortion = recipe.get(`${r.dish_id}|${r.product_id}`);
+      if (!perPortion) continue;
+      const key = `${r.dish_id}|${r.location_id}`;
+      const entry = perDish.get(key) ?? { portions: [], since: null };
+      entry.portions.push(Number(r.wsum) / perPortion);
+      const first = since.get(stockKey(r.product_id, r.location_id)) ?? null;
+      if (first && (!entry.since || first < entry.since)) entry.since = first;
+      perDish.set(key, entry);
+    }
+    for (const [key, e] of perDish) {
+      const sorted = [...e.portions].sort((a, b) => a - b);
+      const mid = sorted[Math.floor(sorted.length / 2)] ?? 0;
+      const v = velocityFromWeightedSum(mid, observedDays(today, settings.forecastWindowDays, e.since));
+      dishDemand.set(key, { perDay: v.perDay, confidence: v.confidence });
+    }
+  }
+
+  return { seq, today, settings, locations, products, batches, tracked, dishes, velocities, dishDemand, stock };
 }
 
 const MAX_SCOPES_PER_SNAPSHOT = 16;

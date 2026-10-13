@@ -45,6 +45,10 @@ function main(): void {
   const out = resolve(process.cwd(), '../../docs/samples/upd-donskoy.xml');
   mkdirSync(dirname(out), { recursive: true });
   writeFileSync(out, encodeCp1251(xml));
+  // копия для вкладки «Тестирование → Накладные»: оттуда её можно скачать и загрузить в приход
+  const forTesting = resolve(process.cwd(), '../web/public/test-invoices/06-upd-donskoy.xml');
+  mkdirSync(dirname(forTesting), { recursive: true });
+  writeFileSync(forTesting, encodeCp1251(xml));
   console.log(`Образец УПД: ${out}`);
 }
 

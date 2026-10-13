@@ -1,6 +1,7 @@
 import { UNIT_LABELS, type Page, type ProductDto } from '@zapas/shared';
 import { X } from 'lucide-react';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useGet } from '../../api/hooks';
 import { Input } from '../Controls/Controls';
 import styles from './ProductPicker.module.scss';
@@ -33,6 +34,9 @@ export function ProductPicker({ value, onChange, sellableOnly, id, invalid, desc
   const [cursor, setCursor] = useState(0);
   const listId = useId();
   const root = useRef<HTMLDivElement>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const listEl = useRef<HTMLUListElement>(null);
+  const [place, setPlace] = useState<{ left: number; width: number; top?: number; bottom?: number; maxHeight: number } | null>(null);
   const q = useDebounced(text.trim(), 180);
 
   const results = useGet<Page<ProductDto>>(
@@ -47,11 +51,35 @@ export function ProductPicker({ value, onChange, sellableOnly, id, invalid, desc
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (!root.current?.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (!root.current?.contains(t) && !listEl.current?.contains(t)) setOpen(false);
     };
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);
   }, [open]);
+
+  // Список рисуется поверх страницы, а не внутри карточки: у карточек overflow:hidden, и он обрезал бы выпадающий список.
+  // Если снизу мало места, список раскрывается вверх.
+  useLayoutEffect(() => {
+    if (!open || value) return;
+    const update = () => {
+      const box = input.current?.getBoundingClientRect();
+      if (!box) return;
+      const below = window.innerHeight - box.bottom - 12;
+      const above = box.top - 12;
+      const up = below < 200 && above > below;
+      const width = Math.max(box.width, 280);
+      const left = Math.max(8, Math.min(box.left, window.innerWidth - width - 8));
+      setPlace(up ? { left, width, bottom: window.innerHeight - box.top + 4, maxHeight: Math.min(280, above) } : { left, width, top: box.bottom + 4, maxHeight: Math.min(280, below) });
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [open, value, text]);
 
   const choose = (p: ProductDto) => {
     onChange(p);
@@ -79,6 +107,7 @@ export function ProductPicker({ value, onChange, sellableOnly, id, invalid, desc
     <div className={styles.root} ref={root}>
       <div className={styles.box}>
         <Input
+          ref={input}
           {...(id ? { id } : { 'aria-label': 'Продукт' })}
           role="combobox"
           aria-expanded={open && !value}
@@ -106,8 +135,9 @@ export function ProductPicker({ value, onChange, sellableOnly, id, invalid, desc
           </button>
         )}
       </div>
-      {open && !value && (
-        <ul className={styles.list} id={listId} role="listbox">
+      {open && !value && place &&
+        createPortal(
+        <ul ref={listEl} className={styles.list} id={listId} role="listbox" style={{ left: place.left, width: place.width, top: place.top, bottom: place.bottom, maxHeight: place.maxHeight }}>
           {results.isLoading && <li className={styles.note}>Ищем…</li>}
           {!results.isLoading && items.length === 0 && <li className={styles.note}>Ничего не найдено</li>}
           {items.map((p, i) => (
@@ -131,8 +161,9 @@ export function ProductPicker({ value, onChange, sellableOnly, id, invalid, desc
               <small>{UNIT_LABELS[p.unit]}</small>
             </li>
           ))}
-        </ul>
-      )}
+        </ul>,
+        root.current?.closest('dialog') ?? document.body,
+        )}
     </div>
   );
 }

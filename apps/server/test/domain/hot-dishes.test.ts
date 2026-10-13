@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeHotDishes, MAX_PUSH_PORTIONS, type HotDish, type HotInput } from '../../src/domain/hot-dishes';
+import { computeHotDishes, MAX_PUSH_PORTIONS, MIN_PUSH_PORTIONS, type HotDish, type HotInput } from '../../src/domain/hot-dishes';
 import type { RecBatch, RecLocation, RecProduct, RecVelocity } from '../../src/domain/recommendations';
 import { stockKey, type StockPoint } from '../../src/domain/stoplist';
 
@@ -82,7 +82,7 @@ describe('горячие предложения', () => {
     expect(byName(list, 'Паста')!.priority).toBeLessThan(101);
   });
 
-  it('чем больше истекающего остатка, тем меньшую его часть закроет блюдо', () => {
+  it('чем больше истекающего остатка, тем меньшую его часть закроет блюдо, но деньги растут вместе с тем, что оно способно израсходовать', () => {
     const list = scene(
       [batch('B1', 'milk', 2, 1), batch('B2', 'kefir', 8, 1)],
       [dish('d1', 'Каша', [['milk', 0.1]]), dish('d2', 'Оладьи', [['kefir', 0.1]])],
@@ -91,24 +91,66 @@ describe('горячие предложения', () => {
     const large = byName(list, 'Оладьи')!;
     expect(small.reasons[0]?.share).toBe(1);
     expect(large.reasons[0]?.share).toBeCloseTo(0.3, 2);
-    expect(small.priority).toBeGreaterThan(large.priority);
+    // Оладьи израсходуют 2,4 кг, Каша 2 кг: приоритет следует за деньгами, а не за долей остатка
+    expect(large.atRiskValue).toBeGreaterThan(small.atRiskValue);
+    expect(large.priority).toBeGreaterThanOrEqual(small.priority);
   });
 
-  it('блюдо, которое почти не влияет на большой остаток, в список не попадает', () => {
-    const list = scene([batch('B1', 'kefir', 40, 1)], [dish('d1', 'Оладьи', [['kefir', 0.1]])]);
+  it('приоритет считается в деньгах: столько же сырья даёт тот же приоритет и на малом, и на большом остатке', () => {
+    const tiny = scene([batch('B1', 'kefir', 2.4, 1)], [dish('d1', 'Оладьи', [['kefir', 0.1]])]);
+    const huge = scene([batch('B1', 'kefir', 40, 1)], [dish('d1', 'Оладьи', [['kefir', 0.1]])]);
+    expect(huge[0]?.reasons[0]?.share).toBeLessThan(0.1);
+    expect(huge[0]?.priority).toBe(tiny[0]?.priority);
+  });
+
+  it('копеечное блюдо на дешёвом остатке в список не попадает', () => {
+    const list = scene([batch('B1', 'potato', 3, 3, { unitCost: 20 })], [dish('d1', 'Пюре', [['potato', 0.02]])]);
     expect(list).toHaveLength(0);
+  });
+
+  it('главным ингредиентом называет тот, на котором больше денег, а не тот, который почти закончился', () => {
+    const list = scene(
+      [batch('B1', 'beef', 12, 1, { unitCost: 600 }), batch('B2', 'cream', 0.1, 3, { unitCost: 200 })],
+      [dish('d1', 'Борщ', [['beef', 0.12], ['cream', 0.01]])],
+    );
+    const borsch = byName(list, 'Борщ')!;
+    expect(borsch.reasons[0]?.productId).toBe('beef');
+    expect(borsch.details).toContain('Главный ингредиент «Говядина»');
+  });
+
+  it('партии берутся по FEFO: сначала дорогая ближняя, потом дальняя', () => {
+    const list = scene(
+      [batch('B1', 'milk', 1, 0, { unitCost: 100 }), batch('B2', 'milk', 1, 5, { unitCost: 10 })],
+      [dish('d1', 'Каша', [['milk', 0.06]])],
+    );
+    // 24 порции по 60 г: 1,44 кг, из них 1 кг по 100 и 0,44 кг по 10
+    expect(list[0]?.atRiskValue).toBeCloseTo(104.4, 1);
+  });
+
+  it('продукт, записанный в рецептуре двумя строками, считается один раз', () => {
+    const twice = scene([batch('B1', 'milk', 2, 1)], [dish('d1', 'Каша', [['milk', 0.05], ['milk', 0.05]])]);
+    const once = scene([batch('B1', 'milk', 2, 1)], [dish('d1', 'Каша', [['milk', 0.1]])]);
+    expect(twice[0]?.reasons).toHaveLength(1);
+    expect(twice[0]?.priority).toBe(once[0]?.priority);
+    expect(twice[0]?.reasons[0]?.share).toBeLessThanOrEqual(1);
+  });
+
+  it('блюдо без приоритета не отнимает остаток у тех, кто в списке', () => {
+    const batches = [batch('B1', 'sour', 3, 1, { unitCost: 300 }), batch('B2', 'butter', 1, 6, { unitCost: 5 })];
+    const solo = scene(batches, [dish('d1', 'Борщ', [['sour', 0.05]])]);
+    const withNoise = scene(batches, [dish('d1', 'Борщ', [['sour', 0.05]]), dish('d9', 'Тост', [['butter', 0.01], ['sour', 0.001]])]);
+    expect(withNoise.find((d) => d.dishName === 'Борщ')?.priority).toBe(solo[0]?.priority);
   });
 
   it('учитывает, сколько ингредиента уходит на порцию', () => {
     const list = scene(
-      [batch('B1', 'beef', 3, 1), batch('B2', 'potato', 3, 1)],
+      [batch('B1', 'beef', 3, 1), batch('B2', 'potato', 3, 1, { unitCost: 400 })],
       [dish('d1', 'Жаркое', [['beef', 0.2]]), dish('d2', 'Пюре', [['potato', 0.02]])],
     );
     const stew = byName(list, 'Жаркое')!;
     const puree = byName(list, 'Пюре')!;
     expect(stew.reasons[0]?.portionsToUse).toBe(15);
     expect(puree.reasons[0]?.portionsToUse).toBe(MAX_PUSH_PORTIONS);
-    expect(stew.priority).toBeGreaterThan(puree.priority);
   });
 
   it('если продажи и так выбирают партию, приоритет ниже, чем когда она не уйдёт', () => {
@@ -125,7 +167,7 @@ describe('горячие предложения', () => {
 
   it('остаток, нужный нескольким блюдам, делится между ними', () => {
     const list = scene(
-      [batch('B1', 'sour', 1, 1)],
+      [batch('B1', 'sour', 1, 1, { unitCost: 400 })],
       [dish('d1', 'Борщ', [['sour', 0.03]]), dish('d2', 'Блины', [['sour', 0.02]])],
     );
     expect(list).toHaveLength(2);
@@ -141,7 +183,7 @@ describe('горячие предложения', () => {
 
   it('когда первое блюдо забрало весь остаток, второе в список не попадает', () => {
     const list = scene(
-      [batch('B1', 'sour', 0.5, 1)],
+      [batch('B1', 'sour', 0.5, 1, { unitCost: 400 })],
       [dish('d1', 'Борщ', [['sour', 0.02]]), dish('d2', 'Блины', [['sour', 0.01]])],
     );
     expect(list).toHaveLength(1);
@@ -194,5 +236,29 @@ describe('горячие предложения', () => {
     const b = scene(batches, [...dishes].reverse()).map((d) => d.dishName);
     expect(a).toEqual(b);
     expect(a).toEqual(['Блины', 'Вафли', 'Пудинг']);
+  });
+
+  it('известные продажи ограничивают, сколько порций стоит продвигать', () => {
+    const batches = [batch('B1', 'beef', 12, 1, { unitCost: 600 })];
+    const d = dish('d1', 'Жаркое', [['beef', 0.1]]);
+    const demand = (perDay: number, confidence = 1) => ({ dishDemand: new Map([['d1|K', { perDay, confidence }]]) });
+    // блюдо продаётся 2 порции в сутки: за двое суток ингредиента это 4 порции, меньше нижней границы не берём
+    expect(scene(batches, [d], demand(2))[0]?.reasons[0]?.portionsToUse).toBe(MIN_PUSH_PORTIONS);
+    // 30 порций в сутки: за двое суток 60, это больше общего потолка в 24
+    expect(scene(batches, [d], demand(30))[0]?.reasons[0]?.portionsToUse).toBe(60);
+    // продаж не знаем (новое блюдо): общий потолок
+    expect(scene(batches, [d], demand(2, 0.1))[0]?.reasons[0]?.portionsToUse).toBe(MAX_PUSH_PORTIONS);
+    expect(scene(batches, [d])[0]?.reasons[0]?.portionsToUse).toBe(MAX_PUSH_PORTIONS);
+  });
+
+  it('блюдо, которое почти не продаётся, получает меньший приоритет, чем ходовое, на том же сырье', () => {
+    const batches = [batch('B1', 'beef', 12, 1, { unitCost: 600 })];
+    const list = scene(batches, [dish('d1', 'Редкое', [['beef', 0.1]]), dish('d2', 'Ходовое', [['beef', 0.1]])], {
+      dishDemand: new Map([
+        ['d1|K', { perDay: 1, confidence: 1 }],
+        ['d2|K', { perDay: 25, confidence: 1 }],
+      ]),
+    });
+    expect(list[0]?.dishName).toBe('Ходовое');
   });
 });

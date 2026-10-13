@@ -13,6 +13,7 @@ vi.mock('../../api/hooks', () => ({
     if (path === '/selfcheck') {
       return { data: { checkedAt: '2026-10-12T10:00:00.000Z', items: [{ id: 'db', group: 'Основа', title: 'База данных', status: 'ok', detail: 'Отвечает' }, { id: 'tg', group: 'Настройки', title: 'Telegram', status: 'warn', detail: 'Не подключён' }] }, isLoading: false, isError: false, isFetching: false, refetch: vi.fn() };
     }
+    if (path === '/invoices/capabilities') return { data: { upd: true, photo: false }, isLoading: false, isError: false };
     return { data: undefined, isLoading: false, isError: false };
   },
 }));
@@ -67,5 +68,15 @@ describe('страница тестирования', () => {
     expect(screen.getByText(/Пройдено 1 из/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Сбросить отметки' }));
     expect(screen.getByText(/Пройдено 0 из/)).toBeTruthy();
+  });
+  it('показывает пакет тестовых накладных и выключает разбор фото, пока не подключён сервис', () => {
+    render(at('/testing?tab=invoices'));
+    expect(screen.getByText('Чистый скан ТОРГ-12')).toBeTruthy();
+    expect(screen.getByText('УПД файлом (XML)')).toBeTruthy();
+    expect(screen.getByText(/не задан ключ GigaChat/)).toBeTruthy();
+    const buttons = screen.getAllByRole('button', { name: /Разобрать здесь/ });
+    expect(buttons).toHaveLength(6);
+    expect((buttons[0] as HTMLButtonElement).disabled).toBe(true);
+    expect((buttons[5] as HTMLButtonElement).disabled).toBe(false);
   });
 });

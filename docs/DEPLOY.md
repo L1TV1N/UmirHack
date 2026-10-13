@@ -105,7 +105,7 @@ docker compose exec -T db pg_dump -U zapas_admin zapas | gzip > zapas-$(date +%F
 
 - Telegram: `TELEGRAM_BOT_TOKEN` и `TELEGRAM_CHAT_ID`. Токен опрашивает только один экземпляр приложения. Если сервер не достаёт до `api.telegram.org`, задайте `TELEGRAM_PROXY_URL=socks5://логин:пароль@IP:порт`: бот, сводки и уведомления пойдут через прокси.
 - Письма поставщикам: `SMTP_URL` и `SMTP_FROM`.
-- Распознавание фото накладной: `ANTHROPIC_API_KEY`.
+- Распознавание фото накладной: `GIGACHAT_AUTH_KEY` (и `GIGACHAT_INSECURE_TLS=true`, если нет файла сертификата). Проще всего скриптом: `bash deploy/set-gigachat.sh` спросит ключ, проверит его у сервиса и перезапустит приложение.
 
 Все переменные описаны в README.
 

@@ -13,10 +13,11 @@ import { useToast } from '../../components/Toast/Toast';
 import { eanBits } from '../../lib/ean';
 import { fmtDateTime } from '../../lib/format';
 import { useUrlState } from '../../lib/useUrlState';
+import { Invoices } from './Invoices';
 import styles from './Testing.module.scss';
 
-type Tab = 'barcodes' | 'checks' | 'scenarios';
-const TABS: Tab[] = ['barcodes', 'checks', 'scenarios'];
+type Tab = 'barcodes' | 'invoices' | 'checks' | 'scenarios';
+const TABS: Tab[] = ['barcodes', 'invoices', 'checks', 'scenarios'];
 
 function Bars({ code }: { code: string }) {
   const r = eanBits(code);
@@ -146,6 +147,8 @@ export const SCENARIOS: Scenario[] = [
   { id: 'scan-ean', group: 'Сканер', text: 'Открыть «Операции → Приход», нажать «Сканировать» и ввести штрихкод вручную с вкладки «Штрихкоды»', hint: 'Продукт должен подставиться в строку', to: '/operations?tab=receipt' },
   { id: 'scan-bad', group: 'Сканер', text: 'Ввести номер с неверной контрольной цифрой', hint: 'Сканер должен отказать понятным сообщением', to: '/operations?tab=receipt' },
   { id: 'scan-inv', group: 'Сканер', text: 'В инвентаризации найти позицию по штрихкоду', to: '/inventory' },
+  { id: 'invoice-photo', group: 'Накладные', text: 'Разобрать фото из вкладки «Накладные»: поставщик и строки должны найтись, а неопознанная позиция остаться без пары', to: '/testing?tab=invoices' },
+  { id: 'invoice-xml', group: 'Накладные', text: 'Загрузить XML-образец УПД в «Операции → Приход → Приход по накладной» и провести приход', to: '/operations?tab=receipt' },
   { id: 'receipt', group: 'Учёт', text: 'Провести приход со сроком годности и проверить партию в «Остатках → Партии»', to: '/operations?tab=receipt' },
   { id: 'fefo', group: 'Учёт', text: 'Списать продукт без выбора партии и убедиться, что ушла партия с ближайшим сроком', to: '/operations?tab=writeoff' },
   { id: 'transfer', group: 'Учёт', text: 'Переместить продукт на другую точку: срок и себестоимость партии не меняются', to: '/operations?tab=transfer' },
@@ -220,18 +223,20 @@ export default function TestingPage() {
   }, []);
   return (
     <>
-      <PageHeader title="Тестирование" subtitle="Штрихкоды для проверки сканера, проверка системы одной кнопкой и чек-лист ручных сценариев." />
+      <PageHeader title="Тестирование" subtitle="Штрихкоды для сканера, пакет тестовых накладных, проверка системы одной кнопкой и чек-лист ручных сценариев." />
       <Tabs<Tab>
         label="Разделы тестирования"
         value={tab}
         onChange={(v) => setUrl({ tab: v })}
         items={[
           { value: 'barcodes', label: 'Штрихкоды' },
+          { value: 'invoices', label: 'Накладные' },
           { value: 'checks', label: 'Проверка системы' },
           { value: 'scenarios', label: 'Сценарии' },
         ]}
       />
       {tab === 'barcodes' && <Barcodes />}
+      {tab === 'invoices' && <Invoices />}
       {tab === 'checks' && <Checks />}
       {tab === 'scenarios' && <Scenarios />}
     </>

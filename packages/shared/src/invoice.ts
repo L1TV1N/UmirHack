@@ -156,6 +156,6 @@ export type ItemMapBody = z.infer<typeof itemMapBody>;
 
 export interface InvoiceCapabilitiesDto {
   upd: true;
-  /** Распознавание фото накладной подключено (нужен ключ ИИ-сервиса). */
+  /** Чтение фото накладной подключено (на сервере задан ключ GigaChat). */
   photo: boolean;
 }

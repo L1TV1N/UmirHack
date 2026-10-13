@@ -91,7 +91,7 @@ function hotDishesFrom(snap: Snapshot, stop: StopListDto, scopeIds: string[] | n
   const blockedProducts = new Set<string>();
   for (const e of stop.entries) (e.entityType === 'dish' ? blockedDishes : blockedProducts).add(`${e.entityId}|${e.locationId}`);
   return computeHotDishes(
-    { products: snap.products, locations: snap.locations, batches: snap.batches, velocities: snap.velocities, dishes: snap.dishes, stock: snap.stock, blockedDishes, blockedProducts },
+    { products: snap.products, locations: snap.locations, batches: snap.batches, velocities: snap.velocities, dishes: snap.dishes, dishDemand: snap.dishDemand, stock: snap.stock, blockedDishes, blockedProducts },
     { locationIds: scopeIds, limit: MAX_HOT_DISHES },
   );
 }
