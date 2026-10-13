@@ -4,7 +4,7 @@ import { post, put } from '../../api/client';
 import { useAction, useGet } from '../../api/hooks';
 import { Button } from '../../components/Button/Button';
 import { Chip } from '../../components/Chip/Chip';
-import { Field, FieldRow, Input } from '../../components/Controls/Controls';
+import { Checkbox, Field, FieldRow, Input } from '../../components/Controls/Controls';
 import { ErrorNote, Loading } from '../../components/Feedback/Feedback';
 import { Panel } from '../../components/Panel/Panel';
 import { useToast } from '../../components/Toast/Toast';
@@ -23,6 +23,7 @@ export function SettingsPanel() {
     lowPortionThreshold: '',
     digestHour: '',
   });
+  const [flags, setFlags] = useState({ useDemandModel: true, autoWriteoffExpired: false });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -37,6 +38,7 @@ export function SettingsPanel() {
         lowPortionThreshold: String(s.lowPortionThreshold),
         digestHour: String(s.digestHour),
       });
+      setFlags({ useDemandModel: s.useDemandModel, autoWriteoffExpired: s.autoWriteoffExpired });
     }
   }, [settings.data]);
 
@@ -46,7 +48,7 @@ export function SettingsPanel() {
   const submit = (e: FormEvent) => {
     e.preventDefault();
     setFormError(null);
-    const parsed = settingsBody.safeParse(Object.fromEntries(Object.entries(values).map(([k, v]) => [k, v.trim() === '' ? Number.NaN : Number(v)])));
+    const parsed = settingsBody.safeParse({ ...Object.fromEntries(Object.entries(values).map(([k, v]) => [k, v.trim() === '' ? Number.NaN : Number(v)])), ...flags });
     if (!parsed.success) {
       const out: Record<string, string> = {};
       for (const issue of parsed.error.issues) out[String(issue.path[0])] ??= issue.message;
@@ -83,6 +85,18 @@ export function SettingsPanel() {
           {field('lowPortionThreshold', 'Мало порций, шт.', 'Блюдо с таким числом порций и меньше попадёт в предупреждения')}
           {field('digestHour', 'Час ежедневной сводки', 'По часовому поясу бизнеса, от 0 до 23')}
         </FieldRow>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <Checkbox
+            label="Учитывать день недели, праздники, погоду и акции в прогнозе спроса"
+            checked={flags.useDemandModel}
+            onChange={(e) => setFlags({ ...flags, useDemandModel: e.target.checked })}
+          />
+          <Checkbox
+            label="Раз в сутки автоматически списывать просроченные партии (документ от имени «Система», отмечается в журнале и в Telegram)"
+            checked={flags.autoWriteoffExpired}
+            onChange={(e) => setFlags({ ...flags, autoWriteoffExpired: e.target.checked })}
+          />
+        </div>
         {formError && <ErrorNote message={formError} />}
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <Button variant="primary" type="submit" loading={save.isPending}>

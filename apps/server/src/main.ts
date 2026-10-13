@@ -6,30 +6,36 @@ import { startScheduler } from './modules/notifications/scheduler';
 import { ClaudeInvoiceReader } from './modules/invoices/reader';
 import { HttpWebhookSender } from './modules/integrations/sender';
 import { startWebhookWorker } from './modules/integrations/service';
+import { HttpExchangeTransport } from './modules/exchange/transport';
+import { startExchangeWorker } from './modules/exchange/service';
 import { startForecastWorker } from './modules/forecast/service';
 import { OpenMeteoProvider } from './modules/forecast/weather';
 import { SmtpMailer } from './modules/orders/mailer';
 import { HttpTelegramApi } from './modules/telegram/api';
 import { TelegramBot } from './modules/telegram/bot';
 import { drainStopListSync } from './modules/stoplist/service';
+import { socksFetch } from './modules/telegram/proxy';
 
 loadEnvFile();
 const config = parseConfig();
 const handle = createDb(config.databaseUrl, config.dbPoolMax);
+const telegramFetch = config.telegram?.proxy ? socksFetch(config.telegram.proxy) : fetch;
 const notifier = config.telegram
-  ? new TelegramNotifier(config.telegram.token, config.telegram.chatId)
+  ? new TelegramNotifier(config.telegram.token, config.telegram.chatId, telegramFetch)
   : new NoopNotifier();
 
-const telegram = config.telegram?.commands ? new HttpTelegramApi(config.telegram.token) : null;
+const telegram = config.telegram?.commands ? new HttpTelegramApi(config.telegram.token, telegramFetch) : null;
 const invoiceReader = config.invoicePhoto ? new ClaudeInvoiceReader(config.invoicePhoto.apiKey, config.invoicePhoto.model) : null;
 const webhookSender = new HttpWebhookSender({ allowPrivate: config.webhooks.allowPrivate });
+const exchangeTransport = new HttpExchangeTransport({ allowHosts: config.exchange.allowHosts });
 const mailer = config.smtp ? new SmtpMailer(config.smtp.url, config.smtp.from) : null;
 const weather = config.weatherEnabled ? new OpenMeteoProvider() : null;
-const base = { db: handle.db, config, clock: () => new Date(), notifier, telegram, invoiceReader, webhookSender, mailer, weather };
+const base = { db: handle.db, config, clock: () => new Date(), notifier, telegram, invoiceReader, webhookSender, exchangeTransport, mailer, weather };
 const app = await buildApp(base);
 const runtime = { ...base, log: app.log };
 const stopScheduler = config.scheduler ? startScheduler(runtime) : () => undefined;
 const stopWebhooks = config.scheduler ? startWebhookWorker(runtime) : () => undefined;
+const stopExchange = config.scheduler ? startExchangeWorker(runtime) : () => undefined;
 const stopForecast = config.scheduler ? startForecastWorker(runtime) : () => undefined;
 const stopBot = telegram ? new TelegramBot(runtime, telegram).start() : async () => undefined;
 
@@ -43,6 +49,7 @@ async function shutdown(signal: string): Promise<void> {
   try {
     stopScheduler();
     stopWebhooks();
+    stopExchange();
     stopForecast();
     await stopBot();
     await app.close();

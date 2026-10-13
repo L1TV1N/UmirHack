@@ -5,6 +5,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { Loading } from '../components/Feedback/Feedback';
 import { AppLayout } from '../components/Layout/AppLayout';
 
+const TestingPage = lazy(() => import('../pages/Testing/TestingPage'));
 const LoginPage = lazy(() => import('../pages/Login/LoginPage'));
 const DashboardPage = lazy(() => import('../pages/Dashboard/DashboardPage'));
 const StockPage = lazy(() => import('../pages/Stock/StockPage'));
@@ -13,6 +14,10 @@ const InventoryListPage = lazy(() => import('../pages/Inventory/InventoryListPag
 const InventoryPage = lazy(() => import('../pages/Inventory/InventoryPage'));
 const StopListPage = lazy(() => import('../pages/StopList/StopListPage'));
 const RecommendationsPage = lazy(() => import('../pages/Recommendations/RecommendationsPage'));
+const HotDishesPage = lazy(() => import('../pages/HotDishes/HotDishesPage'));
+const SuppliersPage = lazy(() => import('../pages/Suppliers/SuppliersPage'));
+const HaccpPage = lazy(() => import('../pages/Haccp/HaccpPage'));
+const GuidePage = lazy(() => import('../pages/Guide/GuidePage'));
 const OrdersPage = lazy(() => import('../pages/Orders/OrdersPage'));
 const TraceabilityPage = lazy(() => import('../pages/Traceability/TraceabilityPage'));
 const ProductsPage = lazy(() => import('../pages/Products/ProductsPage'));
@@ -48,6 +53,7 @@ export function App() {
           }
         >
           <Route index element={<DashboardPage />} />
+          <Route path="guide" element={<GuidePage />} />
           <Route path="stock" element={<StockPage />} />
           <Route path="operations" element={<OperationsPage />} />
           <Route path="inventory" element={<InventoryListPage />} />
@@ -68,7 +74,17 @@ export function App() {
               </RequireRole>
             }
           />
+          <Route
+            path="suppliers"
+            element={
+              <RequireRole min="manager">
+                <SuppliersPage />
+              </RequireRole>
+            }
+          />
+          <Route path="haccp" element={<HaccpPage />} />
           <Route path="stop-list" element={<StopListPage />} />
+          <Route path="hot-dishes" element={<HotDishesPage />} />
           <Route path="recommendations" element={<RecommendationsPage />} />
           <Route path="products" element={<ProductsPage />} />
           <Route path="dishes" element={<DishesPage />} />
@@ -77,6 +93,14 @@ export function App() {
             element={
               <RequireRole min="manager">
                 <ReportsPage />
+              </RequireRole>
+            }
+          />
+          <Route
+            path="testing"
+            element={
+              <RequireRole min="manager">
+                <TestingPage />
               </RequireRole>
             }
           />

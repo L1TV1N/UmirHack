@@ -1,0 +1,53 @@
+name: Проверки
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgres://zapas_app:app-pass@127.0.0.1:5432/zapas_test
+      MIGRATION_DATABASE_URL: postgres://zapas_owner:owner-pass@127.0.0.1:5432/zapas_test
+      JWT_SECRET: ci-only-secret-ci-only-secret-ci-only-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Роли и база для тестов
+        run: |
+          PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE zapas_owner LOGIN PASSWORD 'owner-pass';
+          CREATE ROLE zapas_app LOGIN PASSWORD 'app-pass';
+          CREATE DATABASE zapas_test OWNER zapas_owner;
+          REVOKE ALL ON DATABASE zapas_test FROM PUBLIC;
+          GRANT CONNECT ON DATABASE zapas_test TO zapas_app;
+          SQL
+      - run: npm ci
+      - name: Проверка типов
+        run: npm run typecheck
+      - name: Тесты
+        run: npm test
+      - name: Сборка
+        run: npm run build
+      - name: Уязвимости в зависимостях
+        run: npm run audit:prod
+        continue-on-error: true

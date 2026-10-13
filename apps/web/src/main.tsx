@@ -8,6 +8,8 @@ import { ApiError } from './api/client';
 import { App } from './app/App';
 import { AuthProvider } from './auth/AuthProvider';
 import { ScopeProvider } from './auth/ScopeProvider';
+import { ThemeProvider } from './lib/theme';
+import { UiModeProvider } from './lib/uiMode';
 import { ConfirmProvider } from './components/Toast/Confirm';
 import { ToastProvider } from './components/Toast/Toast';
 import './styles/global.scss';
@@ -27,17 +29,21 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById('root') as HTMLElement).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <ToastProvider>
-          <ConfirmProvider>
-            <AuthProvider>
-              <ScopeProvider>
-                <App />
-              </ScopeProvider>
-            </AuthProvider>
-          </ConfirmProvider>
-        </ToastProvider>
-      </BrowserRouter>
+      <ThemeProvider>
+        <UiModeProvider>
+          <BrowserRouter>
+            <ToastProvider>
+              <ConfirmProvider>
+                <AuthProvider>
+                  <ScopeProvider>
+                    <App />
+                  </ScopeProvider>
+                </AuthProvider>
+              </ConfirmProvider>
+            </ToastProvider>
+          </BrowserRouter>
+        </UiModeProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   </StrictMode>,
 );

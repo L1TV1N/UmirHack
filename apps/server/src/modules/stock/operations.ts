@@ -12,6 +12,7 @@ import { sql, type Transaction } from 'kysely';
 import type { Database } from '../../db/types';
 import { actorName, actorUserId, type Actor, type Deps } from '../../lib/context';
 import {
+  AppError,
   badRequest,
   PG_UNIQUE_VIOLATION,
   pgCode,
@@ -25,6 +26,7 @@ import { businessToday } from '../../lib/time';
 import { writeAudit } from '../audit/audit';
 import { invalidateSnapshots } from '../analytics/snapshot';
 import { scheduleStopListSync } from '../stoplist/service';
+import { enqueueExchange } from '../exchange/service';
 import { applyReceiptToOrder, lockOrderForReceipt } from '../orders/service';
 import { recordReceiptTraceability } from '../traceability/service';
 import {
@@ -74,7 +76,8 @@ interface WorkResult {
 type Work = (trx: Transaction<Database>, doc: { id: string; number: string }) => Promise<WorkResult>;
 
 function idempotencyScope(actor: Actor): string {
-  return actor.principal.kind === 'user' ? `u:${actor.principal.id}` : `k:${actor.principal.id}`;
+  const p = actor.principal;
+  return p.kind === 'user' ? `u:${p.id}` : p.kind === 'apikey' ? `k:${p.id}` : 'system';
 }
 
 async function findByKey(deps: Deps, scope: string, key: string, hash: string): Promise<DocResult | null> {
@@ -135,6 +138,7 @@ async function runDocument(deps: Deps, actor: Actor, opts: DocOptions, work: Wor
         .executeTakeFirstOrThrow();
 
       const result = await work(trx, created);
+      await enqueueExchange(trx, { id: created.id, kind: opts.kind, locationId: opts.locationId, toLocationId: opts.toLocationId }, now);
       await writeAudit(trx, {
         action: opts.auditAction,
         entity: 'document',
@@ -148,7 +152,7 @@ async function runDocument(deps: Deps, actor: Actor, opts: DocOptions, work: Wor
     }));
 
     // касса шлёт продажи потоком: сбрасывать кеш на каждую значило бы отключить его, там хватает фонового пересчёта
-    if (actor.principal.kind === 'user') invalidateSnapshots(deps.db);
+    if (actor.principal.kind !== 'apikey') invalidateSnapshots(deps.db);
     scheduleStopListSync(deps, locations);
     return { documentId: doc.id, number: doc.number, duplicate: false };
   } catch (err) {
@@ -168,13 +172,14 @@ interface ProductInfo {
   cost: number;
   sellable: boolean;
   isActive: boolean;
+  shelfLifeDays: number | null;
 }
 
 async function loadProducts(trx: Transaction<Database>, ids: string[]): Promise<Map<string, ProductInfo>> {
   if (ids.length === 0) return new Map();
   const rows = await trx
     .selectFrom('products')
-    .select(['id', 'name', 'unit', 'price', 'cost', 'sellable', 'is_active'])
+    .select(['id', 'name', 'unit', 'price', 'cost', 'sellable', 'is_active', 'shelf_life_days'])
     .where('id', 'in', ids)
     .execute();
   return new Map(
@@ -188,6 +193,7 @@ async function loadProducts(trx: Transaction<Database>, ids: string[]): Promise<
         cost: Number(r.cost),
         sellable: r.sellable,
         isActive: r.is_active,
+        shelfLifeDays: r.shelf_life_days,
       },
     ]),
   );
@@ -245,21 +251,29 @@ export function receive(deps: Deps, actor: Actor, body: ReceiptBody, idempotency
     async (trx, doc) => {
       const now = deps.clock();
       const products = await loadProducts(trx, [...new Set(body.lines.map((l) => l.productId))]);
-      body.lines.forEach((l, i) => {
+      // срок годности: дата из запроса, иначе день приёмки плюс срок хранения (из строки или из карточки продукта)
+      const lines = body.lines.map((l, i) => {
         const p = products.get(l.productId);
         if (!p || !p.isActive) {
           throw badRequest('Продукт не найден или отключён', [{ path: ['lines', i, 'productId'], message: 'Недоступен для прихода' }]);
         }
-        if (l.expiresOn < today && !body.allowExpired) {
+        const shelf = l.shelfLifeDays ?? p.shelfLifeDays;
+        const expiresOn = l.expiresOn ?? (shelf ? addDays(today, shelf) : null);
+        if (!expiresOn) {
+          throw badRequest(`Для «${p.name}» не указан срок годности`, [{ path: ['lines', i, 'expiresOn'], message: 'Укажите дату или срок хранения в днях' }], 'shelf_life_required');
+        }
+        if (expiresOn < today && !body.allowExpired) {
           throw unprocessable('Срок годности уже истёк', [{ path: ['lines', i, 'expiresOn'], message: 'Срок в прошлом' }], 'already_expired');
         }
-        if (l.expiresOn > addDays(today, MAX_SHELF_DAYS)) {
+        if (expiresOn > addDays(today, MAX_SHELF_DAYS)) {
           throw badRequest('Срок годности слишком далёкий', [{ path: ['lines', i, 'expiresOn'], message: 'Слишком далёкая дата' }]);
         }
+        return { ...l, expiresOn };
       });
-      assertWholePieces(products, body.lines);
+      assertWholePieces(products, lines);
       // приход по заказу: поставщик берётся из заказа, а принятое засчитывается в заказ
       const order = body.orderId ? await lockOrderForReceipt(trx, body.orderId, body.locationId, body.supplierId) : null;
+      if (order) await trx.updateTable('documents').set({ order_id: order.id }).where('id', '=', doc.id).execute();
       const supplierId = body.supplierId ?? order?.supplierId ?? null;
       if (supplierId) {
         const s = await trx.selectFrom('suppliers').select('id').where('id', '=', supplierId).where('is_active', '=', true).executeTakeFirst();
@@ -267,7 +281,7 @@ export function receive(deps: Deps, actor: Actor, body: ReceiptBody, idempotency
       }
 
       const userId = actorUserId(actor.principal);
-      const batchRows = body.lines.map((l) => ({
+      const batchRows = lines.map((l) => ({
         id: crypto.randomUUID(),
         product_id: l.productId,
         location_id: body.locationId,
@@ -305,18 +319,18 @@ export function receive(deps: Deps, actor: Actor, body: ReceiptBody, idempotency
         .execute();
 
       const trace = await recordReceiptTraceability(trx, {
-        lines: body.lines,
+        lines: lines,
         batches: batchRows,
         products,
         supplierId,
         locationId: body.locationId,
         now,
       });
-      const ordered = order ? await applyReceiptToOrder(trx, order, body.lines, now) : null;
+      const ordered = order ? await applyReceiptToOrder(trx, order, lines, now) : null;
 
-      const total = roundMoney(body.lines.reduce((s, l) => s + l.quantity * l.unitCost, 0));
+      const total = roundMoney(lines.reduce((s, l) => s + l.quantity * l.unitCost, 0));
       return {
-        details: { lines: body.lines.length, supplierId, totalCost: total, ...(order ? { order: order.number, ...(ordered && ordered.extra > 0 ? { outsideOrder: ordered.extra } : {}) } : {}), ...(trace.marks > 0 ? { marks: trace.marks } : {}), ...(trace.vsd > 0 ? { vsd: trace.vsd } : {}) },
+        details: { lines: lines.length, supplierId, totalCost: total, ...(order ? { order: order.number, ...(ordered && ordered.extra > 0 ? { outsideOrder: ordered.extra } : {}) } : {}), ...(trace.marks > 0 ? { marks: trace.marks } : {}), ...(trace.vsd > 0 ? { vsd: trace.vsd } : {}) },
         locations: [body.locationId],
       };
     },
@@ -331,12 +345,39 @@ interface SaleGroup {
   quantity: number;
 }
 
-export function sell(
-  deps: Deps,
-  actor: Actor,
-  input: { locationId: string; comment?: string | undefined; lines: SaleBody['lines'] },
-  idempotencyKey?: string,
-): Promise<DocResult> {
+type SaleInput = { locationId: string; comment?: string | undefined; lines: SaleBody['lines'] };
+
+/**
+ * Продажа или заказ блюд. Отказ из-за нехватки запоминается: по таким отказам считается статистика
+ * дефицитных ингредиентов и упущенная выручка. Сам документ при отказе не создаётся.
+ */
+export async function sell(deps: Deps, actor: Actor, input: SaleInput, idempotencyKey?: string): Promise<DocResult> {
+  try {
+    return await sellDocument(deps, actor, input, idempotencyKey);
+  } catch (err) {
+    if (err instanceof AppError && err.code === 'insufficient_stock') {
+      await recordRefusal(deps, actor, input, err).catch((e) => deps.log.error({ err: e }, 'не удалось записать отказ в заказе'));
+    }
+    throw err;
+  }
+}
+
+async function recordRefusal(deps: Deps, actor: Actor, input: SaleInput, err: AppError): Promise<void> {
+  const missing = [...new Set((Array.isArray(err.details) ? (err.details as { productId?: unknown }[]) : []).flatMap((d) => (typeof d.productId === 'string' ? [d.productId] : [])))];
+  if (missing.length === 0) return;
+  const dishIds = [...new Set(input.lines.flatMap((l) => ('dishId' in l ? [l.dishId] : [])))];
+  const productIds = [...new Set(input.lines.flatMap((l) => ('productId' in l ? [l.productId] : [])))];
+  const dishes = dishIds.length ? await deps.db.selectFrom('dishes').select(['id', 'price']).where('id', 'in', dishIds).execute() : [];
+  const products = productIds.length ? await deps.db.selectFrom('products').select(['id', 'price']).where('id', 'in', productIds).execute() : [];
+  const price = new Map<string, number>([...dishes, ...products].map((r) => [r.id, Number(r.price)]));
+  const total = input.lines.reduce((sum, l) => sum + l.quantity * (price.get('dishId' in l ? l.dishId : l.productId) ?? 0), 0);
+  await deps.db
+    .insertInto('sale_refusals')
+    .values({ location_id: input.locationId, created_at: deps.clock(), order_total: roundMoney(total), missing, source: actor.principal.kind === 'apikey' ? 'pos' : 'user' })
+    .execute();
+}
+
+function sellDocument(deps: Deps, actor: Actor, input: SaleInput, idempotencyKey?: string): Promise<DocResult> {
   const today = businessToday(deps);
   return runDocument(
     deps,

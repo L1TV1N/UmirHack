@@ -1,0 +1,234 @@
+{
+  "main": {
+    "id": "05a01f37d2890f04",
+    "type": "split",
+    "children": [
+      {
+        "id": "03b57edcc563ca3d",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "72d55682a4b4d635",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "README.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "README"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "2be0098f10b60462",
+    "type": "split",
+    "children": [
+      {
+        "id": "16d6dbd0969153c2",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "141201beb722f056",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Файловый менеджер"
+            }
+          },
+          {
+            "id": "3ffcc01dae7c8f3f",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Поиск"
+            }
+          },
+          {
+            "id": "a75dab93a0a43c9b",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-bookmark",
+              "title": "Закладки"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "e841ca4f06990c6c",
+    "type": "split",
+    "children": [
+      {
+        "id": "e71e2e9b232b3490",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "7e4efbbf958aa10d",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Обратные ссылки"
+            }
+          },
+          {
+            "id": "dd80743bb4a7d860",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Исходящие ссылки"
+            }
+          },
+          {
+            "id": "2a02aa3c3ebb161a",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Теги"
+            }
+          },
+          {
+            "id": "0d82e8b6012de2d8",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "Все свойства"
+            }
+          },
+          {
+            "id": "d5a2ed824c1d751d",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Структура"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Меню быстрого перехода": false,
+      "graph:Граф": false,
+      "canvas:Создать новый холст": false,
+      "daily-notes:Сегодняшняя заметка": false,
+      "templates:Вставить шаблон": false,
+      "command-palette:Открыть палитру команд": false,
+      "bases:Создать новую базу": false
+    }
+  },
+  "active": "72d55682a4b4d635",
+  "lastOpenFiles": [
+    "docs/brand/logo-mark.svg",
+    "docs/brand/logo-mark.png",
+    "docs/brand/logo-light.png",
+    "docs/brand/logo-dark.png",
+    "docs/brand/banner.png",
+    "docs/brand/mockups/19-palette.jpg",
+    "docs/brand/mockups/12-forecast.jpg",
+    "docs/brand/mockups/03-dark.jpg",
+    "docs/brand/mockups/01-hero.jpg",
+    "docs/API.md",
+    "docs/ARCHITECTURE.md",
+    "docs/BRAND.md",
+    "docs/DEMO.md",
+    "docs/SECURITY.md",
+    "docs/DEPLOY.md",
+    "README.md",
+    "apps/web/src/components/CommandPalette/sedPajSjg",
+    "docs/brand/mockups/20-everywhere.jpg",
+    "docs/brand/mockups/18-help.jpg",
+    "deploy/set-telegram.sh",
+    "deploy/server-setup.sh",
+    "deploy",
+    "apps/server/test/telegram-proxy.test.ts",
+    "apps/server/src/modules/telegram/proxy.ts",
+    "node_modules/socks/typings/common/receiveBuffer.d.ts",
+    "node_modules/socks/typings/common/util.d.ts",
+    "node_modules/socks/typings/common/helpers.d.ts",
+    "node_modules/socks/typings/common/constants.d.ts",
+    "node_modules/socks/README.md",
+    "node_modules/socks/docs/examples/typescript/connectExample.md",
+    "node_modules/socks/docs/examples/typescript/bindExample.md",
+    "node_modules/socks/docs/examples/typescript/associateExample.md",
+    "node_modules/socks/docs/examples/javascript/connectExample.md",
+    "node_modules/socks/docs/examples/javascript/bindExample.md",
+    "node_modules/socks/docs/examples/javascript/associateExample.md",
+    "node_modules/socks/docs/examples/index.md",
+    "node_modules/socks/docs/migratingFromV1.md",
+    "node_modules/socks/docs/index.md",
+    "node_modules/smart-buffer/README.md",
+    "node_modules/smart-buffer/docs/ROADMAP.md",
+    "node_modules/smart-buffer/docs/README_v3.md",
+    "node_modules/smart-buffer/docs/CHANGELOG.md",
+    "node_modules/fetch-socks/README.md"
+  ]
+}

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { addDish, addProduct, assertLedgerConsistent, createWorld, receive, remaining, type World } from './fixtures';
+import { addDish, addProduct, assertLedgerConsistent, createWorld, receive, remaining, seedSales, type World } from './fixtures';
 import { call, createTestEnv, type TestEnv } from './helpers';
 import { schedulerTick } from '../src/modules/notifications/scheduler';
 
@@ -220,5 +220,44 @@ describe('стоп-лист', () => {
     expect(env.notifier.messages).toHaveLength(1);
     expect(env.notifier.messages[0]).toContain('Только что закончился');
     expect(env.notifier.messages[0]).not.toContain('Давно');
+  });
+});
+
+describe('прогноз стоп-листа', () => {
+  const forecast = async (token: string, query = '') => (await call(env, token)('GET', `/api/stop-list/forecast${query}`)).json();
+
+  it('называет блюдо, ингредиента которого не хватит, с причиной и временем', async () => {
+    const milk = await addProduct(env, w.categoryId, { name: 'Молоко', unit: 'l', sellable: false });
+    const dish = await addDish(env, 'Каша манная', 160, [{ productId: milk, quantity: 0.5 }]);
+    await seedSales(env, { productId: milk, locationId: w.kitchen.id, days: 25, perDay: 4 });
+    await receive(env, w.manager.token, w.kitchen.id, [{ productId: milk, quantity: 3, expiresOn: w.day(30) }]);
+
+    const list = await forecast(w.manager.token);
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ dishId: dish, dishName: 'Каша манная', cause: 'depletion', portionsNow: 6 });
+    expect(list[0].limiting).toMatchObject({ productName: 'Молоко', availableNow: 3, perPortion: 0.5 });
+    // 4 литра в сутки, пока не останется меньше порции в 0,5 л: около 15 часов
+    expect(list[0].hoursLeft).toBeGreaterThanOrEqual(13);
+    expect(list[0].hoursLeft).toBeLessThanOrEqual(17);
+    expect(new Date(list[0].expectedAt).getTime()).toBeGreaterThan(env.clock.now.getTime());
+  });
+
+  it('когда ингредиент закончился, блюдо уже в стоп-листе и в прогнозе его нет', async () => {
+    const milk = await addProduct(env, w.categoryId, { name: 'Молоко', unit: 'l', sellable: false });
+    await addDish(env, 'Каша манная', 160, [{ productId: milk, quantity: 0.5 }]);
+    await seedSales(env, { productId: milk, locationId: w.kitchen.id, days: 25, perDay: 4 });
+    await receive(env, w.manager.token, w.kitchen.id, [{ productId: milk, quantity: 0.3, expiresOn: w.day(30) }]);
+    expect(await forecast(w.manager.token)).toHaveLength(0);
+    const stop = (await call(env, w.manager.token)('GET', '/api/stop-list')).json();
+    expect(stop.entries.some((e: { name: string }) => e.name === 'Каша манная')).toBe(true);
+  });
+
+  it('кладовщик не видит кухню, к которой у него нет доступа', async () => {
+    const milk = await addProduct(env, w.categoryId, { name: 'Молоко', unit: 'l', sellable: false });
+    await addDish(env, 'Каша манная', 160, [{ productId: milk, quantity: 0.5 }]);
+    await seedSales(env, { productId: milk, locationId: w.kitchen.id, days: 25, perDay: 4 });
+    await receive(env, w.manager.token, w.kitchen.id, [{ productId: milk, quantity: 3, expiresOn: w.day(30) }]);
+    expect(await forecast(w.keeperA.token)).toEqual([]);
+    expect((await call(env, w.keeperA.token)('GET', `/api/stop-list/forecast?locationId=${w.kitchen.id}`)).statusCode).toBe(404);
   });
 });

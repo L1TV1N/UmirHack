@@ -34,10 +34,12 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       TELEGRAM_COMMANDS: ${TELEGRAM_COMMANDS:-true}
+      TELEGRAM_PROXY_URL: ${TELEGRAM_PROXY_URL:-}
       SMTP_URL: ${SMTP_URL:-}
       SMTP_FROM: ${SMTP_FROM:-}
       WEBHOOK_ALLOW_PRIVATE: ${WEBHOOK_ALLOW_PRIVATE:-false}
       WEBHOOK_ALLOW_HTTP: ${WEBHOOK_ALLOW_HTTP:-false}
+      EXCHANGE_ALLOW_HOSTS: ${EXCHANGE_ALLOW_HOSTS:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       INVOICE_MODEL: ${INVOICE_MODEL:-claude-opus-5-5}
     ports:
@@ -64,6 +66,21 @@ services:
       JWT_SECRET: ${JWT_SECRET:?Задайте JWT_SECRET в .env}
       BUSINESS_TZ: ${BUSINESS_TZ:-Europe/Moscow}
     command: ["node", "apps/server/dist/seed-cli.js", "--reset"]
+
+  # Генератор событий для показа: поставки и заказы гостей через API, панель обновляется на глазах.
+  # Запуск после загрузки демо-данных: docker compose --profile demo up -d emulate
+  # Скорость задаёт EMULATE_SPEED (1 - заказ раз в 4 секунды). Пользователь и пароль по умолчанию как у менеджера демо-стенда.
+  emulate:
+    build: .
+    profiles: ["demo"]
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      EMULATE_URL: http://app:3000
+      EMULATE_EMAIL: ${EMULATE_EMAIL:-}
+      EMULATE_PASSWORD: ${EMULATE_PASSWORD:-}
+    command: ["node", "apps/server/dist/emulate-cli.js", "--speed", "${EMULATE_SPEED:-1}"]
 
   # Первый администратор на чистой базе (без демо-данных). Запуск: docker compose --profile admin run --rm create-admin
   # Почту, имя и пароль спросит в терминале, пароль при вводе не показывается.

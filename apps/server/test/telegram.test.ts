@@ -529,7 +529,7 @@ describe('клиент Bot API', () => {
       return new Response(JSON.stringify({ ok: true, result: [{ update_id: 5 }] }), { status: 200 });
     }) as typeof fetch);
     expect(await api.getUpdates(7, 25)).toEqual([{ update_id: 5 }]);
-    expect(bodies[0]).toMatchObject({ offset: 7, timeout: 25, allowed_updates: ['message'] });
+    expect(bodies[0]).toMatchObject({ offset: 7, timeout: 25, allowed_updates: ['message', 'callback_query'] });
   });
 });
 

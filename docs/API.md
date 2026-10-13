@@ -60,6 +60,8 @@ Idempotency-Key: web-7d1c…
 }
 ```
 
+Срок годности строки задаётся одним из трёх способов: датой `expiresOn`, сроком хранения в днях `shelfLifeDays` (дата считается от дня приёмки) или не задаётся вовсе, тогда берётся срок хранения из карточки продукта. Дата и срок хранения вместе не принимаются (400). Если срока нет нигде, 400 `shelf_life_required`.
+
 ```http
 POST /api/documents/sales
 { "locationId": "…", "lines": [{ "productId": "…", "quantity": 2 }, { "dishId": "…", "quantity": 1 }] }
@@ -89,6 +91,14 @@ X-Api-Key: zk_…
 ```
 
 Точка берётся из ключа. `externalId` служит ключом идемпотентности.
+
+### Приём чеков кассы
+
+`POST /api/pos/ingest` с ключом кассы принимает чек в формате кассы (JSON, XML, CSV; тело и `Content-Type` как у кассы). Правила разбора берутся из подключения (пресет вендора или свои). Ответ всегда 200, если чек понят: `{ results: [{ externalId, kind: sale|return, status, duplicate, documentNumber, unmatched, error }] }`, где `status` это `done`, `pending_match` (есть неизвестная позиция), `rejected` (например, нехватка остатка) или `return_logged`. Нечитаемое тело даёт 400 `pos_unreadable` с объяснением, что не нашли. `?dryRun=1` разбирает чек, ничего не записывая.
+
+Менеджер и выше: `GET /pos/connections`, `GET /pos/presets`, `POST /pos/connections/:id/preview { payload }` (проверка образца), `GET /pos/inbox?keyId&status&limit`, `GET /pos/unmatched`, `PUT /pos/map { keyId, ref, entity: product|dish|ignore, entityId? }` (сопоставление, ждавшие чеки обрабатываются сразу, ответ `{ replayed }`), `POST /pos/inbox/:id/retry`. Администратор: `POST /pos/connections { name, locationId, vendor, rules? }` → 201 с `key` (показывается один раз), `PATCH /pos/connections/:id`; отключение ключа `DELETE /api-keys/:id`.
+
+Ленты кассы: `GET /pos/stop-list`, `GET /pos/stop-list/iiko` (вид, близкий к iikoCloud), `GET /pos/products`.
 
 ## Остатки и учёт
 
@@ -124,6 +134,19 @@ X-Api-Key: zk_…
 | `GET /analytics/dashboard` | показатели панели, остатки по срокам, списания за 30 дней, главные риски |
 | `GET /analytics/recommendations` | `{ items, counts, total }`: рекомендации с действиями (до 500 самых приоритетных), счётчики по типам, общий итог. Фильтры `type` и `locationId` |
 | `GET /analytics/forecast/:productId?locationId=…` | скорость расхода, расход по дням, риск по партиям |
+| `GET /analytics/rescued` | сколько выручили с товара, проданного по скидке до конца срока, за `days` суток (1–90): выручка, себестоимость, сколько стоила скидка, число партий и товары. Фильтр `locationId` |
+| `GET /analytics/suppliers` | рейтинг поставщиков за `days` суток (7–365, по умолчанию 90), менеджер и выше: оценка 0–100 и класс A/B/C, выполнение заказов, доля вовремя, свежесть при приёмке, потери по причинам, а также общие потери по причинам. Фильтр `locationId` |
+| `GET /stop-list/forecast` | прогноз стоп-листа: блюда кухонь, которые перестанут готовиться в ближайшие 7 суток при текущих продажах и без новых поставок. Для каждого `expectedAt`, `hoursLeft`, `cause` (`depletion` или `expiry`) и ограничивающий ингредиент. Фильтр `locationId` |
+| `GET /analytics/shortages` | дефицитные ингредиенты за `days` суток (1–90, по умолчанию 30): часы без остатка, число остановок, остановленные блюда, отклонённые заказы и их сумма. Фильтр `locationId` |
+| `GET /haccp/summary`, `GET /haccp/points` | сводка (точек, просроченных замеров, открытых отклонений) и контрольные точки с последним замером, сроком следующего и числом отклонений без действия. Менеджер видит и отключённые точки |
+| `POST /haccp/points`, `PATCH /haccp/points/:id` | менеджер: завести точку (`name`, `kind`, `minTemp`, `maxTemp`, `everyHours`) и изменить границы, частоту, отключить |
+| `POST /haccp/readings` | кладовщик и выше: замер `{ pointId, value, comment?, action? }`. Вне границ это отклонение, оно сообщается в Telegram и остаётся открытым, пока не записано `action` |
+| `POST /haccp/readings/:id/action` | записать, что сделали с отклонением (`{ action }`), 409 `action_exists`, `not_a_deviation` |
+| `GET /haccp/readings` | журнал замеров. Фильтры `locationId`, `pointId`, `from`, `to`, `deviations=true`, `limit`, `offset`. Границы в записи это те, что действовали на момент замера |
+| `GET /haccp/inspections/pending`, `GET /haccp/inspections`, `POST /haccp/inspections` | бракераж: партии, ждущие осмотра (скоропорт и продукция с ВСД за три дня), журнал и запись осмотра `{ batchId, temperature?, appearanceOk, packagingOk, decision: accepted или rejected, comment? }`. Отказ сообщается в Telegram. 409 `already_inspected` |
+| `GET /reports/haccp.csv` | менеджер: журнал замеров за период для проверяющих |
+| `GET /events` | поток Server-Sent Events: событие `ready` при подключении и `changed`, когда данные изменились (без тела). Токен в заголовке `Authorization`, до пяти потоков на пользователя (429 `too_many_streams`), поток закрывается сервером через ~14 минут |
+| `GET /analytics/hot-dishes` | `{ asOf, locationId, items }`: горячие предложения, блюда кухонь по убыванию приоритета (до 30) с причинами по ингредиентам. Фильтр `locationId`. Первые пять также приходят в `hotDishes` ответа панели |
 
 ## Приход по накладной
 
@@ -156,7 +179,7 @@ X-Api-Key: zk_…
 
 В `POST /documents/receipts` добавлено необязательное `orderId`: принятое количество засчитывается в заказ, поставщик берётся из заказа. Ошибки: 400 `order_location_mismatch`, `order_supplier_mismatch`; 404, если заказа нет; 409 `order_not_open` (заказ не отправлен или уже закрыт). Продукты, которых не было в заказе, принимаются, но в заказ не засчитываются (в аудите `outsideOrder`).
 
-У поставщика (`SupplierDto`) новые поля `email`, `leadTimeDays`, `minOrderSum`, `autoOrder`; у продукта (`ProductDto`) `defaultSupplierId`, `defaultSupplierName`, `packSize`. Вебхуки получили событие `order.sent` (`OrderSentPayload`: заказ, поставщик, точка, строки с артикулом и штрихкодом).
+У поставщика (`SupplierDto`) новые поля `email`, `leadTimeDays`, `minOrderSum`, `autoOrder`; у продукта (`ProductDto`) `defaultSupplierId`, `defaultSupplierName`, `packSize`. Вебхуки получили событие `order.sent`, а при изменении скидки на партию уходит `promotion.changed` (`PromotionChangedPayload`: точка, товар с артикулом и штрихкодом, действующая скидка `markdown` или `null`, если её отменили). Событие `order.sent` (`OrderSentPayload`: заказ, поставщик, точка, строки с артикулом и штрихкодом).
 
 ## Интеграции
 
@@ -180,7 +203,7 @@ X-Api-Key: zk_…
 | Метод и адрес | Что отдаёт |
 |---|---|
 | `GET /pos/stop-list` | `{ generatedAt, locationId, entries }`: стоп-лист точки ключа в том же виде, что в вебхуке |
-| `GET /pos/products?limit&offset` | страница каталога `{ items: [{ sku, barcode, name, unit, price, sellable, isActive }], total }`, без себестоимости |
+| `GET /pos/products?limit&offset` | страница каталога `{ items: [{ sku, barcode, name, unit, price, markdown, sellable, isActive }], total }`, без себестоимости. `markdown` это скидка на ближайшую по сроку партию, по которой касса продаст следующую единицу: `{ percent, price, endsOn, quantity }`, а без скидки `null`. Продажа через `POST /pos/sales` сама идёт по цене со скидкой |
 
 Импорт номенклатуры (менеджер и выше):
 
@@ -190,6 +213,26 @@ X-Api-Key: zk_…
 | `POST /products/import` | то же тело, записывает новые и изменённые строки одной транзакцией, строки с ошибками пропускает → `{ created, updated, skipped, categoriesCreated }`. Файл разбирается заново внутри транзакции. 409 `nothing_to_import`, если применять нечего, и `import_conflict`, если данные изменились во время записи |
 
 В `DishDto` и в создании и изменении блюда есть необязательное `code` (код блюда в кассе, уникален без учёта регистра, 409 `duplicate_code`).
+
+## Обмен с учётными системами
+
+Менеджер видит, администратор настраивает.
+
+| Метод и адрес | Что делает |
+|---|---|
+| `GET /exchange/systems` | подключения с состоянием, последней ошибкой и счётчиками очереди |
+| `POST /exchange/systems` | `{ kind: "onec", name, baseUrl, username?, password?, profile, docKinds, locationId? }` → 201. Пароль хранится зашифрованным и не возвращается. 400, если адрес внутренний или по http и хоста нет в `EXCHANGE_ALLOW_HOSTS` |
+| `PATCH` и `DELETE /exchange/systems/:id` | правка (в том числе `enabled`) и удаление вместе с очередью |
+| `GET /exchange/presets` | типовые профили 1С |
+| `POST /exchange/systems/:id/check` | проверка: связь, логин, описание интерфейса, объекты и реквизиты. `{ ok, items: [{ ok, text }] }` |
+| `GET /exchange/systems/:id/unlinked` | что нужно связать с 1С |
+| `POST /exchange/systems/:id/autolink` | связь по артикулу и ИНН, только однозначные совпадения: `{ linked, left }` |
+| `GET /exchange/systems/:id/search?entity&q` | поиск в справочнике 1С |
+| `PUT /exchange/systems/:id/links` | `{ entity: product|supplier|location, localId, remoteKey }`, ждавшие документы возвращаются в очередь |
+| `GET /exchange/jobs?systemId&status&limit` | журнал выгрузки |
+| `POST /exchange/jobs/:id/retry` | вернуть в очередь (409, если не нужно) |
+| `POST /documents/:id/exchange` | `{ systemId }`: одна попытка выгрузки сразу, повтор обновляет тот же документ 1С. `{ outcome, job }` |
+| `GET /documents/:id/export/iiko.xml?store&supplier` | приход XML для iiko |
 
 ## Прослеживаемость
 
@@ -218,7 +261,7 @@ X-Api-Key: zk_…
 | `GET/POST /users`, `PATCH /users/:id`, `PUT /users/:id/password`, `POST /users/:id/unlock` | администратор |
 | `GET /telegram`, `POST /telegram/link-code`, `DELETE /telegram/link` | любой вошедший: статус привязки своего чата, одноразовый код привязки (`201`, действует 10 минут), отвязка |
 | `GET /locations` (все), `POST/PATCH /locations` | запись администратор |
-| `GET /settings` (все), `PUT /settings` | запись администратор |
+| `GET /settings` (все), `PUT /settings` | запись администратор. Помимо порогов: `useDemandModel` (поправка прогноза на день недели, праздники, погоду, акции) и `autoWriteoffExpired` (раз в сутки списывать просроченное от имени «Система») |
 | `GET/POST/DELETE /api-keys` | администратор |
 | `GET /audit`, `GET /audit/verify` | администратор |
 | `POST /notifications/test` | администратор |

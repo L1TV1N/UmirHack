@@ -1,0 +1,30 @@
+# Боевой запуск за обратным прокси Caddy с автоматическим HTTPS:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+# Подробности в docs/DEPLOY.md.
+services:
+  app:
+    # наружу приложение не публикуется, к нему ходит только Caddy
+    ports: !reset []
+    environment:
+      TRUST_PROXY: "1"
+      COOKIE_SECURE: "true"
+      APP_ORIGINS: https://${DOMAIN:?Задайте DOMAIN в .env}
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?Задайте DOMAIN в .env}
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

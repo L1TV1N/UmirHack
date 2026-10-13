@@ -1,0 +1,16 @@
+{$DOMAIN} {
+	# поток обновлений идёт без сжатия и без буфера: события должны доходить сразу
+	@events path /api/events
+	handle @events {
+		reverse_proxy app:3000 {
+			flush_interval -1
+		}
+	}
+
+	handle {
+		encode zstd gzip
+		reverse_proxy app:3000
+	}
+
+	header -Server
+}

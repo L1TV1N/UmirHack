@@ -81,3 +81,20 @@
 .promo {
   margin-left: 6px;
 }
+
+.facts {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: var(--ink-700);
+
+  li + li {
+    margin-top: 4px;
+  }
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}

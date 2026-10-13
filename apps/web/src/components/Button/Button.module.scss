@@ -38,7 +38,7 @@
 
 .primary {
   background: var(--brand-600);
-  color: var(--white);
+  color: var(--fixed-light);
 
   &:hover:not(:disabled) {
     background: var(--brand-700);
@@ -76,7 +76,7 @@
 
 .dangerSolid {
   background: var(--danger-600);
-  color: var(--white);
+  color: var(--fixed-light);
 
   &:hover:not(:disabled) {
     background: var(--danger-700);

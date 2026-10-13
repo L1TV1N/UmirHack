@@ -15,6 +15,7 @@ import { asUser, requireUser } from '../../plugins/access';
 import { listAudit, verifyAuditChain, writeAudit } from '../audit/audit';
 import { sendDigest } from '../notifications/digest';
 import { getSettings, saveSettings } from '../settings/settings';
+import { runSelfCheck } from './selfcheck';
 
 export const adminRoutes =
   (deps: Deps): FastifyPluginAsyncZod =>
@@ -24,6 +25,9 @@ export const adminRoutes =
     const settingsDto = async (): Promise<SettingsDto> => ({ ...(await getSettings(db)), telegramConfigured: deps.notifier.enabled });
 
     app.get('/settings', { config: asUser() }, settingsDto);
+
+    /** Самопроверка для вкладки «Тестирование»: только чтение состояния. */
+    app.get('/selfcheck', { config: asUser('manager') }, async () => runSelfCheck(deps));
 
     app.put('/settings', { config: asUser('admin'), schema: { body: settingsBody } }, async (req) => {
       const principal = requireUser(req);

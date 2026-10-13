@@ -46,7 +46,13 @@
   margin-bottom: 20px;
   flex-wrap: wrap;
 
-  h1 + p {
+  .titleRow {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .titleRow + p {
     margin-top: 4px;
     color: var(--ink-500);
     max-width: 70ch;

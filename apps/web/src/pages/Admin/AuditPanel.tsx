@@ -77,8 +77,8 @@ export function AuditPanel() {
     { key: 'when', header: 'Когда', cell: (r) => <span className="num">{fmtDateTime(r.at)}</span> },
     { key: 'who', header: 'Кто', cell: (r) => r.userEmail ?? <span className="muted">система</span> },
     { key: 'what', header: 'Действие', cell: (r) => <Chip tone={tone(r.action)}>{LABELS[r.action] ?? r.action}</Chip> },
-    { key: 'entity', header: 'Объект', cell: (r) => (r.entityId ? <span className="mono">{r.entityId.slice(0, 8)}</span> : <span className="muted">—</span>) },
-    { key: 'ip', header: 'IP', cell: (r) => <span className="mono">{r.ip ?? '—'}</span> },
+    { key: 'entity', header: 'Объект', cell: (r) => (r.entityId ? <span className="mono">{r.entityId.slice(0, 8)}</span> : <span className="muted">-</span>) },
+    { key: 'ip', header: 'IP', cell: (r) => <span className="mono">{r.ip ?? '-'}</span> },
     {
       key: 'details',
       header: 'Подробности',

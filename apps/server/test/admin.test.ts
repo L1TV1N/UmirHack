@@ -227,6 +227,37 @@ describe('уведомления', () => {
     expect(env.notifier.messages.filter((m) => m.includes('Сводка на'))).toHaveLength(2);
   });
 
+  it('автосписание просроченного выключено по умолчанию, включённое работает раз в сутки от имени системы', async () => {
+    const deps = { db: env.db, config: env.config, clock: () => env.clock.now, notifier: env.notifier, log: console };
+    const cheese = await addProduct(env, w.categoryId, { name: 'Сыр' });
+    await receive(env, w.manager.token, w.locA.id, [{ productId: cheese, quantity: 3, expiresOn: w.day(-1) }], { allowExpired: true });
+    await receive(env, w.manager.token, w.locA.id, [{ productId: cheese, quantity: 4, expiresOn: w.day(5) }]);
+    const writeoffs = () => env.db.selectFrom('documents').select(['actor_name', 'comment']).where('kind', '=', 'writeoff').execute();
+
+    await schedulerTick(deps);
+    expect(await remaining(env, cheese, w.locA.id)).toBe(7);
+    expect(await writeoffs()).toHaveLength(0);
+
+    const settings = { expiringSoonDays: 3, criticalDays: 1, forecastWindowDays: 28, reorderCoverDays: 7, lowPortionThreshold: 3, digestHour: 3, autoWriteoffExpired: true };
+    expect((await call(env, w.admin.token)('PUT', '/api/settings', settings)).statusCode).toBe(200);
+    await schedulerTick(deps);
+    expect(await remaining(env, cheese, w.locA.id)).toBe(4);
+    const docs = await writeoffs();
+    expect(docs).toHaveLength(1);
+    expect(docs[0]).toMatchObject({ actor_name: 'Система', comment: 'Автоматическое списание просроченного' });
+    expect(env.notifier.messages.some((m) => m.includes('Автоматически списано'))).toBe(true);
+
+    // в те же сутки второй раз не списывает, годная партия не тронута
+    await schedulerTick(deps);
+    expect(await writeoffs()).toHaveLength(1);
+
+    // на следующие сутки списывается то, что успело истечь
+    env.clock.advance(6 * 24 * 3_600_000);
+    await schedulerTick(deps);
+    expect(await remaining(env, cheese, w.locA.id)).toBe(0);
+    expect(await writeoffs()).toHaveLength(2);
+  });
+
   it('клиент Telegram ходит только на свой хост и сообщает об ошибке', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
     await new TelegramNotifier('123:ABC', '-1001', fetchMock as unknown as typeof fetch).send('привет');
@@ -290,3 +321,18 @@ describe('справочники', () => {
   });
 });
 
+
+describe('самопроверка', () => {
+  it('доступна менеджеру и выше, отдаёт пункты по группам и ловит расхождение остатков', async () => {
+    const w2 = w;
+    expect((await call(env, w2.keeperA.token)('GET', '/api/selfcheck')).statusCode).toBe(403);
+    expect((await call(env, null)('GET', '/api/selfcheck')).statusCode).toBe(401);
+    const res = await call(env, w2.manager.token)('GET', '/api/selfcheck');
+    expect(res.statusCode, res.body).toBe(200);
+    const items = res.json().items as { id: string; status: string; group: string }[];
+    expect(items.find((i) => i.id === 'db')?.status).toBe('ok');
+    expect(items.find((i) => i.id === 'ledger')?.status).toBe('ok');
+    expect(new Set(items.map((i) => i.group)).size).toBeGreaterThanOrEqual(4);
+    expect(items.every((i) => ['ok', 'warn', 'fail'].includes(i.status))).toBe(true);
+  });
+});

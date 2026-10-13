@@ -36,7 +36,7 @@ vi.mock('../../api/hooks', () => ({
     },
   }),
 }));
-vi.mock('../../auth/ScopeProvider', () => ({ useScope: () => ({ locationId: undefined, nameOf: () => '—' }) }));
+vi.mock('../../auth/ScopeProvider', () => ({ useScope: () => ({ locationId: undefined, nameOf: () => '-' }) }));
 vi.mock('../../components/Toast/Toast', () => ({ useToast: () => toast }));
 vi.mock('./OrderDialog', () => ({
   STATUS_TONE: { draft: 'neutral', sent: 'info', partial: 'amber', received: 'ok', cancelled: 'neutral' },

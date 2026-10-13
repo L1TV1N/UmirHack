@@ -18,7 +18,7 @@ export default function ReportsPage() {
   const [busy, setBusy] = useState<string | null>(null);
 
   useEffect(() => {
-    document.title = 'Отчёты — Запас';
+    document.title = 'Отчёты - Запас';
   }, []);
 
   const get = async (key: string, path: string, query: Record<string, string | undefined>, name: string) => {

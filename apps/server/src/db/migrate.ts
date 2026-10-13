@@ -20,9 +20,13 @@ const DELETABLE = [
   'webhook_deliveries',
   'purchase_order_lines',
   'calendar_days',
+  'external_systems',
+  'external_refs',
+  'exchange_jobs',
+  'pos_code_map',
 ];
 // Журналы только на добавление: даже владелец приложения не может переписать историю.
-const APPEND_ONLY = ['stock_movements', 'audit_log', 'batch_marks'];
+const APPEND_ONLY = ['stock_movements', 'audit_log', 'batch_marks', 'haccp_readings', 'haccp_actions', 'haccp_inspections'];
 
 export interface MigrateOptions {
   url: string;

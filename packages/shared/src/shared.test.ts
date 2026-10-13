@@ -99,6 +99,15 @@ describe('схемы', () => {
     expect(receiptBody.safeParse(badDate).success).toBe(false);
   });
 
+  it('принимает срок хранения в днях вместо даты, но не оба способа сразу', () => {
+    const line = { productId: uuid, quantity: 1, unitCost: 10 };
+    expect(receiptBody.safeParse({ locationId: uuid, lines: [{ ...line, shelfLifeDays: 5 }] }).success).toBe(true);
+    expect(receiptBody.safeParse({ locationId: uuid, lines: [line] }).success).toBe(true);
+    expect(receiptBody.safeParse({ locationId: uuid, lines: [{ ...line, expiresOn: '2026-10-20', shelfLifeDays: 5 }] }).success).toBe(false);
+    expect(receiptBody.safeParse({ locationId: uuid, lines: [{ ...line, shelfLifeDays: 0 }] }).success).toBe(false);
+    expect(receiptBody.safeParse({ locationId: uuid, lines: [{ ...line, shelfLifeDays: 4000 }] }).success).toBe(false);
+  });
+
   it('требует ровно одну сущность для ручного стопа', () => {
     expect(manualStopBody.safeParse({ locationId: uuid, reason: 'нет', productId: uuid }).success).toBe(true);
     expect(manualStopBody.safeParse({ locationId: uuid, reason: 'нет' }).success).toBe(false);

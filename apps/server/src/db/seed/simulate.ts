@@ -1,5 +1,5 @@
 import { addDays, daysBetween } from '@zapas/shared';
-import { DISHES, kitchenDemandPerDay, PRODUCTS, RETAIL_DEMAND, VIA_WAREHOUSE, type ProductSpec } from './data';
+import { DISHES, kitchenDemandPerDay, PRODUCTS, RETAIL_DEMAND, SHORTAGE_HISTORY, SUPPLIER_PROFILES, SUPPLIERS, VIA_WAREHOUSE, type ProductSpec } from './data';
 import { demoWeather, weatherMultiplier } from './weather';
 
 export interface DocRow {
@@ -11,6 +11,8 @@ export interface DocRow {
   actor: string;
   comment: string | null;
   createdAt: Date;
+  /** Заказ поставщику, по которому принят приход. */
+  orderId?: string | null;
 }
 
 export interface BatchRow {
@@ -49,10 +51,49 @@ export interface SimIds {
   dishes: Record<string, string>;
 }
 
+export interface SimShortage {
+  productId: string;
+  locationId: string;
+  startedAt: Date;
+  endedAt: Date | null;
+  dishesBlocked: number;
+}
+
+export interface SimRefusal {
+  locationId: string;
+  createdAt: Date;
+  total: number;
+  missing: string[];
+}
+
+export interface SimOrder {
+  id: string;
+  number: string;
+  supplierId: string;
+  locationId: string;
+  expectedOn: string;
+  sentAt: Date;
+  closedAt: Date;
+  total: number;
+  lines: { productId: string; quantity: number; unitCost: number; received: number }[];
+}
+
+export interface SimPromotion {
+  batchId: string;
+  percent: number;
+  endsOn: string;
+  createdAt: Date;
+  cancelledAt: Date | null;
+}
+
 export interface SimOutput {
   documents: DocRow[];
   batches: BatchRow[];
   movements: MoveRow[];
+  orders: SimOrder[];
+  promotions: SimPromotion[];
+  shortages: SimShortage[];
+  refusals: SimRefusal[];
   lastNumber: number;
 }
 
@@ -189,6 +230,23 @@ export function simulate(opts: { today: string; days: number; ids: SimIds; nowHo
   const availableMilli = (product: string, loc: string, date: string) =>
     fefo(liveBatches(product, loc), date).reduce((s, b) => s + b.remainingMilli, 0);
 
+  // Скоропорт в последние дни срока магазины уценивают: за три дня 30%, в последние сутки 50%. Как в рекомендациях системы
+  const markdownTiers = new Map<string, Map<number, Date>>();
+  const markdownOrder = new Map<string, number>();
+  function markdownPercent(batch: SimBatch, date: string, spec: ProductSpec, meta: { price?: number | null; dishId?: string | null }): number {
+    if (meta.price !== undefined || meta.dishId) return 0;
+    const left = daysBetween(date, batch.expiresOn);
+    if (spec.shelf > 14 || left > 3 || left < 0) return 0;
+    // уценивают не всё подряд, а отдельные партии: каждую пятую из подходящих
+    if (!markdownOrder.has(batch.id)) markdownOrder.set(batch.id, markdownOrder.size);
+    if ((markdownOrder.get(batch.id) as number) % 5 !== 0) return 0;
+    const percent = left <= 1 ? 50 : 30;
+    const tiers = markdownTiers.get(batch.id) ?? new Map<number, Date>();
+    if (!tiers.has(percent)) tiers.set(percent, at(date, 8, 5));
+    markdownTiers.set(batch.id, tiers);
+    return percent;
+  }
+
   /** Расход по FEFO. Возвращает фактически списанное в тысячных. */
   function consume(
     product: string,
@@ -224,7 +282,7 @@ export function simulate(opts: { today: string; days: number; ids: SimIds; nowHo
         type: kind === 'transfer' ? 'transfer_out' : kind,
         quantity: -t.milli / 1000,
         unitCost: t.batch.unitCost,
-        unitPrice: kind === 'sale' ? (meta.price ?? spec.price) : null,
+        unitPrice: kind === 'sale' ? Math.round((meta.price ?? spec.price) * (1 - markdownPercent(t.batch, meta.docDay, spec, meta) / 100) * 100) / 100 : null,
         reason: kind === 'writeoff' ? (meta.reason ?? 'other') : null,
         dishId: meta.dishId ?? null,
         createdAt: d.createdAt,
@@ -392,6 +450,13 @@ export function simulate(opts: { today: string; days: number; ids: SimIds; nowHo
   stage('milk', 'shopN', 70, 3, 2);
   // скоропорт на кухне: подсказка про блюда дня
   stage('milk', 'kit', 30, 2, 3);
+  // скоропорт на кухне с близким сроком: из него складываются горячие предложения
+  stage('beef', 'kit', 6, 1, 3);
+  stage('sour', 'kit', 3, 2, 4);
+  stage('tomato', 'kit', 7, 2, 3);
+  stage('cucumber', 'kit', 6, 3, 4);
+  stage('chicken', 'kit', 9, 2, 3);
+  stage('curd', 'kit', 5, 3, 5);
   // забытая просрочка, которую ещё не списали
   stage('kefir', 'shopN', 9, -1, 11);
   stage('cream', 'kit', 3.5, -2, 15);
@@ -402,9 +467,85 @@ export function simulate(opts: { today: string; days: number; ids: SimIds; nowHo
   drain('eggs', 'kit', 3, 'damaged');
   drain('milk', 'shopC', 8, 'spoiled');
   drain('chicken', 'shopN', 0, 'spoiled');
-  drain('greens', 'kit', 0, 'spoiled');
+  drain('greens', 'kit', 0.08, 'spoiled');
   drain('butter', 'kit', 0.4, 'damaged');
 
+  // История заказов поставщикам: каждый приход это исполненный заказ. У поставщиков разный характер: кто-то недовозит,
+  // кто-то опаздывает. Отдельный генератор, чтобы история заказов не сдвигала случайные числа торговли
+  const orderRng = mulberry32((opts.seed ?? 20261009) + 7);
+  const byDoc = new Map<string, SimBatch[]>();
+  for (const b of batches) byDoc.set(b.docId, [...(byDoc.get(b.docId) ?? []), b]);
+  const orders: SimOrder[] = [];
+  for (const d of documents) {
+    if (d.kind !== 'receipt') continue;
+    const list = byDoc.get(d.id);
+    const supplierId = list?.[0]?.supplierId;
+    if (!list || !supplierId) continue;
+    const index = Math.max(ids.suppliers.indexOf(supplierId), 0);
+    const profile = SUPPLIER_PROFILES[index] ?? { shortShare: 0.05, lateShare: 0.1 };
+    const lead = SUPPLIERS[index]?.leadTimeDays ?? 1;
+    const receivedDay = new Date(d.createdAt.getTime() + 3 * 3_600_000).toISOString().slice(0, 10);
+    const delay = orderRng() < profile.lateShare ? 1 + Math.floor(orderRng() * 2) : 0;
+    const expectedOn = addDays(receivedDay, -delay);
+    const byProduct = new Map<string, { received: number; cost: number }>();
+    for (const b of list) {
+      const prev = byProduct.get(b.productId);
+      byProduct.set(b.productId, { received: (prev?.received ?? 0) + b.initial, cost: prev?.cost ?? b.unitCost });
+    }
+    const lines = [...byProduct].map(([productId, v]) => {
+      const spec = PRODUCTS.find((p) => ids.products[p.key] === productId);
+      const factor = orderRng() < profile.shortShare ? 0.55 + 0.35 * orderRng() : 1;
+      const wanted = v.received / factor;
+      const quantity = spec?.unit === 'pcs' ? Math.ceil(wanted) : Math.max(Math.round(wanted * 1000) / 1000, v.received);
+      return { productId, quantity, unitCost: v.cost, received: v.received };
+    });
+    orders.push({
+      id: crypto.randomUUID(),
+      number: `ЗК-${String(orders.length + 1).padStart(6, '0')}`,
+      supplierId,
+      locationId: d.locationId,
+      expectedOn,
+      sentAt: new Date(`${addDays(expectedOn, -lead)}T09:00:00+03:00`),
+      closedAt: d.createdAt,
+      total: Math.round(lines.reduce((sum, l) => sum + l.quantity * l.unitCost, 0) * 100) / 100,
+      lines,
+    });
+    d.orderId = orders.at(-1)?.id ?? null;
+  }
+
+  const promotions: SimPromotion[] = [];
+  const batchById = new Map(batches.map((b) => [b.id, b]));
+  for (const [batchId, tiers] of markdownTiers) {
+    const sorted = [...tiers].sort((a, b) => a[0] - b[0]);
+    sorted.forEach(([percent, createdAt], i) => {
+      promotions.push({ batchId, percent, endsOn: (batchById.get(batchId) as SimBatch).expiresOn, createdAt, cancelledAt: sorted[i + 1]?.[1] ?? null });
+    });
+  }
+
+  // Журнал нехваток для статистики дефицита: прошлые эпизоды по сценарию и то, что закончилось прямо сейчас
+  const kitchenId = ids.locations.kit as string;
+  const shortages: SimShortage[] = [];
+  const refusals: SimRefusal[] = [];
+  const dishesWith = (product: string) => DISHES.filter((d) => d.items.some(([key]) => key === product));
+  for (const s of SHORTAGE_HISTORY) {
+    const using = dishesWith(s.product);
+    if (using.length === 0) continue;
+    const started = at(addDays(today, -s.daysAgo), s.hour, 15);
+    shortages.push({ productId: ids.products[s.product] as string, locationId: kitchenId, startedAt: started, endedAt: new Date(started.getTime() + s.hours * 3_600_000), dishesBlocked: using.length });
+    for (let k = 0; k < s.refusals; k += 1) {
+      const dish = using[k % using.length] as (typeof DISHES)[number];
+      refusals.push({
+        locationId: kitchenId,
+        createdAt: new Date(started.getTime() + ((k + 1) * s.hours * 3_600_000) / (s.refusals + 1)),
+        total: dish.price * ((k % 3) + 1),
+        missing: [ids.products[s.product] as string],
+      });
+    }
+  }
+  for (const product of ['cheese', 'cream']) {
+    shortages.push({ productId: ids.products[product] as string, locationId: kitchenId, startedAt: at(today, 8, 30), endedAt: null, dishesBlocked: dishesWith(product).length });
+  }
+
   for (const b of batches) b.remaining = b.remainingMilli / 1000;
-  return { documents, batches, movements, lastNumber: number };
+  return { documents, batches, movements, orders, promotions, shortages, refusals, lastNumber: number };
 }

@@ -12,3 +12,5 @@ export * from './integrations';
 export * from './orders';
 export * from './forecast';
 export * from './calendar';
+export * from './haccp';
+export * from './exchange';

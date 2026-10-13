@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { addDish, addProduct, assertLedgerConsistent, createWorld, receive, seedSales, type World } from './fixtures';
-import { call, createTestEnv, type TestEnv } from './helpers';
+import { call, createTestEnv, createUser, loginAs, type TestEnv } from './helpers';
 
 let env: TestEnv;
 let w: World;
@@ -115,6 +115,182 @@ describe('рекомендации', () => {
     expect(new Set(all.map((r: { locationId: string }) => r.locationId)).size).toBe(2);
     expect(new Set(mine.map((r: { locationId: string }) => r.locationId))).toEqual(new Set([w.locA.id]));
     expect((await call(env, w.keeperA.token)('GET', `/api/analytics/recommendations?locationId=${w.locB.id}`)).statusCode).toBe(404);
+  });
+});
+
+describe('горячие блюда', () => {
+  const hot = async (token: string, query = '') => (await call(env, token)('GET', `/api/analytics/hot-dishes${query}`)).json();
+
+  it('ставит выше блюдо, у которого ингредиент скоро истекает, и объясняет причину', async () => {
+    const milk = await addProduct(env, w.categoryId, { name: 'Молоко', unit: 'l', sellable: false, cost: 60 });
+    const kefir = await addProduct(env, w.categoryId, { name: 'Кефир', unit: 'l', sellable: false, cost: 60 });
+    const soon = await addDish(env, 'Каша манная', 160, [{ productId: milk, quantity: 0.2 }]);
+    await addDish(env, 'Оладьи', 190, [{ productId: kefir, quantity: 0.2 }]);
+    await seedSales(env, { productId: milk, locationId: w.kitchen.id, days: 25, perDay: 2 });
+    await seedSales(env, { productId: kefir, locationId: w.kitchen.id, days: 25, perDay: 2 });
+    await receive(env, w.manager.token, w.kitchen.id, [{ productId: milk, quantity: 12, expiresOn: w.day(1) }]);
+    await receive(env, w.manager.token, w.kitchen.id, [{ productId: kefir, quantity: 12, expiresOn: w.day(6) }]);
+
+    const res = await hot(w.manager.token);
+    expect(res.items.length).toBeGreaterThan(0);
+    expect(res.items[0]).toMatchObject({ dishId: soon, dishName: 'Каша манная', daysLeft: 1, portions: 60 });
+    expect(res.items[0].reasons[0]).toMatchObject({ productName: 'Молоко', daysLeft: 1 });
+    expect(res.items[0].details).toMatch(/Молоко: истекает завтра/);
+    const later = res.items.find((d: { dishName: string }) => d.dishName === 'Оладьи');
+    if (later) expect(later.priority).toBeLessThan(res.items[0].priority);
+  });
+
+  it('обновляется после расхода: когда ингредиента не осталось, блюдо уходит из списка', async () => {
+    const milk = await addProduct(env, w.categoryId, { name: 'Молоко', unit: 'l', sellable: false, cost: 60 });
+    await addDish(env, 'Каша манная', 160, [{ productId: milk, quantity: 0.2 }]);
+    await seedSales(env, { productId: milk, locationId: w.kitchen.id, days: 25, perDay: 2 });
+    await receive(env, w.manager.token, w.kitchen.id, [{ productId: milk, quantity: 12, expiresOn: w.day(1) }]);
+    expect((await hot(w.manager.token)).items).toHaveLength(1);
+
+    const done = await call(env, w.manager.token)('POST', '/api/documents/writeoffs', {
+      locationId: w.kitchen.id,
+      reason: 'other',
+      lines: [{ productId: milk, quantity: 12 }],
+    });
+    expect(done.statusCode).toBe(201);
+    expect((await hot(w.manager.token)).items).toHaveLength(0);
+  });
+
+  it('не предлагает блюдо, снятое с продажи вручную', async () => {
+    const milk = await addProduct(env, w.categoryId, { name: 'Молоко', unit: 'l', sellable: false, cost: 60 });
+    const dish = await addDish(env, 'Каша манная', 160, [{ productId: milk, quantity: 0.2 }]);
+    await receive(env, w.manager.token, w.kitchen.id, [{ productId: milk, quantity: 12, expiresOn: w.day(1) }]);
+    expect((await hot(w.manager.token)).items).toHaveLength(1);
+
+    const stop = await call(env, w.manager.token)('POST', '/api/stop-list/manual', { locationId: w.kitchen.id, dishId: dish, reason: 'Нет повара' });
+    expect(stop.statusCode).toBe(201);
+    expect((await hot(w.manager.token)).items).toHaveLength(0);
+  });
+
+  it('кладовщик не видит чужую кухню, а панель отдаёт первые блюда', async () => {
+    const milk = await addProduct(env, w.categoryId, { name: 'Молоко', unit: 'l', sellable: false, cost: 60 });
+    await addDish(env, 'Каша манная', 160, [{ productId: milk, quantity: 0.2 }]);
+    await receive(env, w.manager.token, w.kitchen.id, [{ productId: milk, quantity: 12, expiresOn: w.day(1) }]);
+
+    expect((await hot(w.keeperA.token)).items).toHaveLength(0);
+    expect((await call(env, w.keeperA.token)('GET', `/api/analytics/hot-dishes?locationId=${w.kitchen.id}`)).statusCode).toBe(404);
+    expect((await call(env, w.manager.token)('GET', '/api/analytics/dashboard')).json().hotDishes[0]).toMatchObject({ dishName: 'Каша манная' });
+  });
+});
+
+/** Токен менеджера на текущий момент часов теста: токены живут час, а тесты ниже переводят время на дни. */
+async function managerNow(): Promise<string> {
+  return (await loginAs(env, await createUser(env, { role: 'manager' }))).token;
+}
+
+describe('спасено уценкой', () => {
+  const rescued = async (token: string, query = '') => (await call(env, token)('GET', `/api/analytics/rescued${query}`)).json();
+  const buy = (productId: string, quantity: number) => call(env, w.keeperA.token)('POST', '/api/documents/sales', { locationId: w.locA.id, lines: [{ productId, quantity }] });
+
+  it('считает выручку с товара, проданного по скидке, и не считает продажи без неё', async () => {
+    const milk = await addProduct(env, w.categoryId, { name: 'Молоко', unit: 'l', price: 100, cost: 60 });
+    await receive(env, w.manager.token, w.locA.id, [{ productId: milk, quantity: 20, expiresOn: w.day(2), unitCost: 60 }]);
+    expect((await buy(milk, 2)).statusCode).toBe(201);
+    expect((await rescued(w.manager.token)).batches).toBe(0);
+    env.clock.advance(1000);
+
+    const batch = (await env.owner.selectFrom('batches').select('id').executeTakeFirstOrThrow()).id;
+    expect((await call(env, w.manager.token)('POST', '/api/promotions', { batchId: batch, percent: 30 })).statusCode).toBe(201);
+    env.clock.advance(1000);
+    expect((await buy(milk, 5)).statusCode).toBe(201);
+
+    const r = await rescued(w.manager.token);
+    // 5 л по 70 рублей, себестоимость 300, скидка стоила 150
+    expect(r).toMatchObject({ days: 30, batches: 1, revenue: 350, cost: 300, discountGiven: 150 });
+    expect(r.products[0]).toMatchObject({ productName: 'Молоко', quantity: 5, revenue: 350 });
+  });
+
+  it('после отмены скидки продажи по обычной цене в отчёт не попадают', async () => {
+    const milk = await addProduct(env, w.categoryId, { name: 'Молоко', unit: 'l', price: 100, cost: 60 });
+    await receive(env, w.manager.token, w.locA.id, [{ productId: milk, quantity: 20, expiresOn: w.day(2), unitCost: 60 }]);
+    const batch = (await env.owner.selectFrom('batches').select('id').executeTakeFirstOrThrow()).id;
+    const promo = await call(env, w.manager.token)('POST', '/api/promotions', { batchId: batch, percent: 30 });
+    await buy(milk, 3);
+    env.clock.advance(60_000);
+    await call(env, w.manager.token)('DELETE', `/api/promotions/${promo.json().id}`);
+    env.clock.advance(60_000);
+    await buy(milk, 4);
+    expect(await rescued(w.manager.token)).toMatchObject({ revenue: 210, discountGiven: 90 });
+  });
+
+  it('блюда и чужие точки не учитываются, период ограничивает выборку', async () => {
+    const milk = await addProduct(env, w.categoryId, { name: 'Молоко', unit: 'l', price: 100, cost: 60 });
+    await receive(env, w.manager.token, w.locA.id, [{ productId: milk, quantity: 20, expiresOn: w.day(2), unitCost: 60 }]);
+    const batch = (await env.owner.selectFrom('batches').select('id').executeTakeFirstOrThrow()).id;
+    await call(env, w.manager.token)('POST', '/api/promotions', { batchId: batch, percent: 30 });
+    await buy(milk, 5);
+
+    expect((await rescued(w.manager.token, `?locationId=${w.locB.id}`)).batches).toBe(0);
+    expect((await rescued(w.keeperA.token)).batches).toBe(1);
+    expect((await rescued(w.viewerA.token)).batches).toBe(1);
+    expect((await call(env, w.keeperA.token)('GET', `/api/analytics/rescued?locationId=${w.locB.id}`)).statusCode).toBe(404);
+
+    env.clock.advance(40 * 86_400_000);
+    const later = await managerNow();
+    expect((await rescued(later, '?days=30')).batches).toBe(0);
+    expect((await rescued(later, '?days=90')).batches).toBe(1);
+  });
+});
+
+describe('дефицитные ингредиенты', () => {
+  const stats = async (token: string, query = '') => (await call(env, token)('GET', `/api/analytics/shortages${query}`)).json();
+  const order = (dishId: string, quantity: number) => call(env, w.manager.token)('POST', '/api/documents/sales', { locationId: w.kitchen.id, lines: [{ dishId, quantity }] });
+
+  it('нехватка открывает эпизод, поставка закрывает его, часы считаются по времени', async () => {
+    const milk = await addProduct(env, w.categoryId, { name: 'Молоко', unit: 'l', sellable: false });
+    await addDish(env, 'Каша манная', 160, [{ productId: milk, quantity: 0.5 }]);
+    // 0,3 л меньше порции: блюдо в стопе, молоко в дефиците
+    await receive(env, w.manager.token, w.kitchen.id, [{ productId: milk, quantity: 0.3, expiresOn: w.day(30) }]);
+    await env.settle();
+    const during = await stats(w.manager.token);
+    expect(during.ingredients[0]).toMatchObject({ productName: 'Молоко', episodes: 1, ongoing: true, dishesBlocked: 1 });
+
+    env.clock.advance(5 * 3_600_000);
+    const later = await managerNow();
+    await receive(env, later, w.kitchen.id, [{ productId: milk, quantity: 10, expiresOn: w.day(30) }]);
+    await env.settle();
+    const after = await stats(later);
+    expect(after.ingredients[0]).toMatchObject({ productName: 'Молоко', episodes: 1, ongoing: false });
+    expect(after.ingredients[0].hours).toBeCloseTo(5, 0);
+    expect(after.totals).toMatchObject({ episodes: 1, refusedOrders: 0 });
+  });
+
+  it('отклонённый заказ запоминается с упущенной выручкой и называет недостающий продукт', async () => {
+    const milk = await addProduct(env, w.categoryId, { name: 'Молоко', unit: 'l', sellable: false });
+    const dish = await addDish(env, 'Каша манная', 160, [{ productId: milk, quantity: 0.5 }]);
+    await receive(env, w.manager.token, w.kitchen.id, [{ productId: milk, quantity: 1, expiresOn: w.day(30) }]);
+
+    const refused = await order(dish, 5);
+    expect(refused.statusCode).toBe(422);
+    expect(refused.json().error.code).toBe('insufficient_stock');
+    expect((await order(dish, 1)).statusCode).toBe(201);
+
+    const s = await stats(w.manager.token);
+    expect(s.totals).toMatchObject({ refusedOrders: 1, lostRevenue: 800 });
+    expect(s.ingredients[0]).toMatchObject({ productName: 'Молоко', refusedOrders: 1, lostRevenue: 800 });
+  });
+
+  it('учитывает период и точку, кладовщик не видит чужую кухню', async () => {
+    const milk = await addProduct(env, w.categoryId, { name: 'Молоко', unit: 'l', sellable: false });
+    const dish = await addDish(env, 'Каша манная', 160, [{ productId: milk, quantity: 0.5 }]);
+    await receive(env, w.manager.token, w.kitchen.id, [{ productId: milk, quantity: 1, expiresOn: w.day(60) }]);
+    await order(dish, 5);
+    expect((await stats(w.manager.token, '?days=7')).totals.refusedOrders).toBe(1);
+
+    expect((await stats(w.manager.token, `?locationId=${w.locA.id}`)).totals.refusedOrders).toBe(0);
+    expect((await stats(w.keeperA.token)).ingredients).toEqual([]);
+    expect((await call(env, w.keeperA.token)('GET', `/api/analytics/shortages?locationId=${w.kitchen.id}`)).statusCode).toBe(404);
+    expect((await call(env, w.manager.token)('GET', '/api/analytics/shortages?days=0')).statusCode).toBe(400);
+
+    env.clock.advance(10 * 86_400_000);
+    const later = await managerNow();
+    expect((await stats(later, '?days=7')).totals.refusedOrders).toBe(0);
+    expect((await stats(later, '?days=30')).totals.refusedOrders).toBe(1);
   });
 });
 

@@ -10,7 +10,7 @@
   overflow: visible;
 
   &::backdrop {
-    background: rgba(17, 24, 39, 0.5);
+    background: var(--scrim);
   }
 
   &[open] {

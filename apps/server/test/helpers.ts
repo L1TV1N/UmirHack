@@ -7,16 +7,26 @@ import { createDb, type Db, type DbHandle } from '../src/db/client';
 import { invalidateSnapshots } from '../src/modules/analytics/snapshot';
 import type { Deps } from '../src/lib/context';
 import { FakeWebhookSender } from '../src/modules/integrations/sender';
+import type { ExchangeRequest, ExchangeResponse, ExchangeTransport } from '../src/modules/exchange/transport';
 import { MemoryNotifier } from '../src/modules/notifications/notifier';
 import { resetForecastCache } from '../src/modules/forecast/service';
 import { FakeWeatherProvider } from '../src/modules/forecast/weather';
 import { FakeMailer } from '../src/modules/orders/mailer';
 import { drainStopListSync } from '../src/modules/stoplist/service';
 import { hashPassword } from '../src/modules/auth/password';
-import type { BotCommand, TelegramApi, TelegramUpdate } from '../src/modules/telegram/api';
+import type { BotCommand, Buttons, TelegramApi, TelegramUpdate } from '../src/modules/telegram/api';
 import { TelegramBot } from '../src/modules/telegram/bot';
 import type { InvoiceReader } from '../src/modules/invoices/reader';
 import type { RawInvoice } from '../src/modules/invoices/raw';
+
+/** Транспорт обмена, который тест подменяет на имитацию 1С или на отказ сети. Пока ничего не подключено, любая отправка падает. */
+export class SwitchTransport implements ExchangeTransport {
+  current: ExchangeTransport | null = null;
+  async request(req: ExchangeRequest): Promise<ExchangeResponse> {
+    if (!this.current) throw Object.assign(new Error('refused'), { code: 'ECONNREFUSED' });
+    return this.current.request(req);
+  }
+}
 
 export const TEST_PASSWORD = 'Тестовый-пароль-2026';
 
@@ -35,7 +45,9 @@ export class FakeInvoiceReader implements InvoiceReader {
 /** Telegram без сети: записывает отправленное и отдаёт заранее заготовленные сообщения. */
 export class FakeTelegramApi implements TelegramApi {
   username = 'zapas_test_bot';
-  readonly sent: { chatId: number; text: string }[] = [];
+  readonly sent: { chatId: number; text: string; buttons?: Buttons }[] = [];
+  readonly edits: { chatId: number; messageId: number; text: string; buttons?: Buttons }[] = [];
+  readonly answers: { id: string; text?: string }[] = [];
   commands: BotCommand[] = [];
   queue: TelegramUpdate[] = [];
   private seq = 1000;
@@ -48,8 +60,14 @@ export class FakeTelegramApi implements TelegramApi {
     this.queue = [];
     return next;
   }
-  async sendMessage(chatId: number, text: string) {
-    this.sent.push({ chatId, text });
+  async sendMessage(chatId: number, text: string, buttons?: Buttons) {
+    this.sent.push({ chatId, text, ...(buttons ? { buttons } : {}) });
+  }
+  async editMessage(chatId: number, messageId: number, text: string, buttons?: Buttons) {
+    this.edits.push({ chatId, messageId, text, ...(buttons ? { buttons } : {}) });
+  }
+  async answerCallback(id: string, text?: string) {
+    this.answers.push({ id, ...(text ? { text } : {}) });
   }
   async setCommands(commands: BotCommand[]) {
     this.commands = commands;
@@ -59,6 +77,11 @@ export class FakeTelegramApi implements TelegramApi {
   say(chatId: number, text: string, extra: Partial<TelegramUpdate['message'] & object> = {}): TelegramUpdate {
     this.seq += 1;
     return { update_id: this.seq, message: { message_id: this.seq, from: { id: chatId, username: `user${chatId}` }, chat: { id: chatId, type: 'private' }, text, ...extra } };
+  }
+  /** Нажатие кнопки под сообщением бота. */
+  tap(chatId: number, data: string, messageId = 1): TelegramUpdate {
+    this.seq += 1;
+    return { update_id: this.seq, callback_query: { id: `cb${this.seq}`, from: { id: chatId, username: `user${chatId}` }, data, message: { message_id: messageId, chat: { id: chatId, type: 'private' } } } };
   }
   /** Тексты ответов, отправленных в чат. */
   to(chatId: number): string[] {
@@ -80,6 +103,7 @@ export interface TestEnv {
   invoiceReader: FakeInvoiceReader;
   /** Отправитель вебхуков без сети: запоминает запросы. */
   webhooks: FakeWebhookSender;
+  exchange: SwitchTransport;
   /** Почта без сети: запоминает письма поставщикам. */
   mailer: FakeMailer;
   /** Погода без сети: отдаёт заготовленные сутки. */
@@ -119,12 +143,13 @@ export async function createTestEnv(overrides: Record<string, string> = {}, now 
   const telegram = new FakeTelegramApi();
   const invoiceReader = new FakeInvoiceReader();
   const webhooks = new FakeWebhookSender();
+  const exchange = new SwitchTransport();
   const mailer = new FakeMailer();
   const weather = new FakeWeatherProvider();
-  const app = await buildApp({ db: appHandle.db, config, clock: () => clock.now, notifier, telegram, invoiceReader, webhookSender: webhooks, mailer, weather });
+  const app = await buildApp({ db: appHandle.db, config, clock: () => clock.now, notifier, telegram, invoiceReader, webhookSender: webhooks, exchangeTransport: exchange, mailer, weather });
   await app.ready();
 
-  const runtime: Deps = { db: appHandle.db, config, clock: () => clock.now, notifier, telegram, webhookSender: webhooks, mailer, weather, log: console };
+  const runtime: Deps = { db: appHandle.db, config, clock: () => clock.now, notifier, telegram, webhookSender: webhooks, exchangeTransport: exchange, mailer, weather, log: console };
   let bot = new TelegramBot(runtime, telegram);
   await bot.prepare();
   return {
@@ -136,6 +161,7 @@ export async function createTestEnv(overrides: Record<string, string> = {}, now 
     telegram,
     invoiceReader,
     webhooks,
+    exchange,
     mailer,
     weather,
     deps: runtime,
@@ -161,10 +187,13 @@ export async function createTestEnv(overrides: Record<string, string> = {}, now 
       await sql.raw(`TRUNCATE ${list} RESTART IDENTITY CASCADE`).execute(ownerHandle.db);
       notifier.messages.length = 0;
       telegram.sent.length = 0;
+      telegram.edits.length = 0;
+      telegram.answers.length = 0;
       invoiceReader.result = { number: null, date: null, supplier: null, total: null, lines: [], warnings: [] };
       invoiceReader.failure = null;
       invoiceReader.calls.length = 0;
       webhooks.requests.length = 0;
+      exchange.current = null;
       mailer.sent.length = 0;
       mailer.failure = null;
       weather.reset();

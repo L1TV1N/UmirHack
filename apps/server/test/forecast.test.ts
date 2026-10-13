@@ -1,9 +1,9 @@
 import { addDays, dayOfWeek, type AccuracyDto, type DemandForecastDto } from '@zapas/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { OpenMeteoProvider, refreshWeather, type WeatherDay } from '../src/modules/forecast/weather';
+import { OpenMeteoProvider, refreshWeather } from '../src/modules/forecast/weather';
 import { refreshDemandOutlook, runForecastJobs } from '../src/modules/forecast/service';
 import { addProduct, createWorld, receive, seedSales, type World } from './fixtures';
-import { call, createTestEnv, type TestEnv } from './helpers';
+import { call, createTestEnv, createUser, loginAs, type TestEnv } from './helpers';
 
 let env: TestEnv;
 let w: World;
@@ -88,7 +88,9 @@ describe('календарь', () => {
 
   it('ближайшие выходные будни', async () => {
     env.clock.now = new Date('2026-10-30T09:00:00Z');
-    const res = (await manager()('GET', '/api/calendar/upcoming?days=10')).json();
+    // токены живут час, а часы теста переведены: входим заново
+    const token = (await loginAs(env, await createUser(env, { role: 'manager' }))).token;
+    const res = (await call(env, token)('GET', '/api/calendar/upcoming?days=10')).json();
     expect(res).toEqual([{ date: '2026-11-04', name: 'День народного единства' }]);
   });
 });
@@ -164,7 +166,7 @@ describe('погода', () => {
 
   it('суток без температуры и осадков не сохраняет', async () => {
     await withCoordinates(w.locA.id);
-    env.weather.build = (r, today) => [
+    env.weather.build = (_r, today) => [
       { date: addDays(today, -1), tMax: null, tMin: null, precipMm: null },
       { date: today, tMax: 18, tMin: 9, precipMm: null },
     ];
@@ -277,7 +279,10 @@ describe('прогноз спроса', () => {
     const p = await product({ base: 40, promoOn, promoUplift: 1.7 });
     const batch = await env.owner.selectFrom('batches').select('id').where('product_id', '=', p).orderBy('created_at').executeTakeFirstOrThrow();
     const mk = (startAge: number, endAge: number) =>
-      env.owner.insertInto('promotions').values({ batch_id: batch.id, percent: 20, ends_on: dateOfAge(endAge), created_by: null, created_at: new Date(`${dateOfAge(startAge)}T09:00:00+03:00`), cancelled_at: null }).execute();
+      env.owner
+        .insertInto('promotions')
+        .values({ batch_id: batch.id, percent: 20, ends_on: dateOfAge(endAge), created_by: null, created_at: new Date(`${dateOfAge(startAge)}T09:00:00+03:00`), cancelled_at: new Date(`${dateOfAge(endAge)}T20:00:00+03:00`) })
+        .execute();
     await mk(14, 10);
     await mk(38, 35);
     // действующая акция на ближайшие дни
@@ -327,9 +332,10 @@ describe('прогноз спроса', () => {
 
   it('праздничный будний день прогнозируется как воскресенье', async () => {
     const p = await product({ base: 40 });
-    await admin()('PUT', '/api/calendar/days', { date: addDays(w.today, 2), kind: 'off', note: 'День города' });
+    // завтра пятница: сам по себе будний день, поэтому пометка «День города» может прийти только из календаря
+    await admin()('PUT', '/api/calendar/days', { date: addDays(w.today, 1), kind: 'off', note: 'День города' });
     const d = (await demand(p)).json() as DemandForecastDto;
-    const off = d.forecast[2]!;
+    const off = d.forecast[1]!;
     expect(off.tags.join(' ')).toContain('День города');
     const sundayWeight = d.weekday[0]!;
     const normal = d.forecast.find((f, i) => i > 3 && dayOfWeek(f.date) === dayOfWeek(off.date))!;
@@ -405,7 +411,7 @@ describe('поправка к скорости', () => {
     const boosted = await velocity(p);
     expect(boosted).toBeGreaterThan(before * 1.05);
 
-    const current = (await admin()('GET', '/api/settings')).json();
+    const { telegramConfigured: _telegram, ...current } = (await admin()('GET', '/api/settings')).json();
     const off = await admin()('PUT', '/api/settings', { ...current, useDemandModel: false });
     expect(off.statusCode, off.body).toBe(200);
     env.forget();

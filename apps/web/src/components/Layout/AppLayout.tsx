@@ -6,11 +6,17 @@ import {
   ChevronDown,
   ClipboardCheck,
   FileCheck2,
+  Flame,
   KeyRound,
   LayoutDashboard,
   Lightbulb,
   LogOut,
   Menu,
+  Check,
+  Palette,
+  Sparkles,
+  Search,
+  FlaskConical,
   User,
   OctagonX,
   Package,
@@ -19,12 +25,19 @@ import {
   ShieldCheck,
   Send,
   ShoppingCart,
+  BookOpen,
+  Thermometer,
+  Truck,
 } from 'lucide-react';
-import { useEffect, useRef, useState, type ComponentType } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type ComponentType } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router';
 import { useAuth } from '../../auth/AuthProvider';
 import { useScope } from '../../auth/ScopeProvider';
 import { fmtLongDate } from '../../lib/format';
+import { THEMES, useTheme } from '../../lib/theme';
+import { UI_MODES, useUiMode } from '../../lib/uiMode';
+import { TeamBanner } from '../TeamBanner/TeamBanner';
+import { useLiveUpdates } from '../../lib/useLiveUpdates';
 import { ChangePasswordDialog } from './ChangePasswordDialog';
 import { OfflineStatus } from './OfflineStatus';
 import { TelegramDialog } from './TelegramDialog';
@@ -40,7 +53,7 @@ interface NavItem {
   end?: boolean;
 }
 
-const GROUPS: { title: string; items: NavItem[] }[] = [
+export const GROUPS: { title: string; items: NavItem[] }[] = [
   {
     title: 'Учёт',
     items: [
@@ -49,14 +62,17 @@ const GROUPS: { title: string; items: NavItem[] }[] = [
       { to: '/operations', label: 'Операции', icon: ArrowLeftRight },
       { to: '/inventory', label: 'Инвентаризация', icon: ClipboardCheck },
       { to: '/traceability', label: 'Прослеживаемость', icon: FileCheck2, min: 'storekeeper' },
+      { to: '/haccp', label: 'Журнал HACCP', icon: Thermometer },
     ],
   },
   {
     title: 'Решения',
     items: [
       { to: '/stop-list', label: 'Стоп-лист', icon: OctagonX },
+      { to: '/hot-dishes', label: 'Горячие предложения', icon: Flame },
       { to: '/recommendations', label: 'Рекомендации', icon: Lightbulb },
       { to: '/orders', label: 'Заказы', icon: ShoppingCart, min: 'manager' },
+      { to: '/suppliers', label: 'Поставщики', icon: Truck, min: 'manager' },
     ],
   },
   {
@@ -70,6 +86,8 @@ const GROUPS: { title: string; items: NavItem[] }[] = [
     title: 'Система',
     items: [
       { to: '/reports', label: 'Отчёты', icon: FileSpreadsheet, min: 'manager' },
+      { to: '/testing', label: 'Тестирование', icon: FlaskConical, min: 'manager' },
+      { to: '/guide', label: 'Руководство', icon: BookOpen },
       { to: '/admin', label: 'Администрирование', icon: ShieldCheck, min: 'admin' },
     ],
   },
@@ -77,6 +95,8 @@ const GROUPS: { title: string; items: NavItem[] }[] = [
 
 function UserMenu() {
   const { user, logout } = useAuth();
+  const { theme, setTheme } = useTheme();
+  const { mode, setMode } = useUiMode();
   const [open, setOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [telegramOpen, setTelegramOpen] = useState(false);
@@ -127,6 +147,32 @@ function UserMenu() {
             <KeyRound size={16} />
             Сменить пароль
           </button>
+          <div className={styles.menuGroup} role="group" aria-label="Тема оформления">
+            <span className={styles.menuLabel}>
+              <Palette size={14} aria-hidden="true" />
+              Тема оформления
+            </span>
+            {THEMES.map((t) => (
+              <button key={t.value} type="button" role="menuitemradio" aria-checked={theme === t.value} className={`${styles.menuItem} ${styles.themeItem}`} onClick={() => setTheme(t.value)}>
+                <i className={`${styles.swatch} ${styles[`swatch_${t.value}`]}`} aria-hidden="true" />
+                {t.label}
+                {theme === t.value && <Check size={15} className={styles.themeCheck} aria-hidden="true" />}
+              </button>
+            ))}
+          </div>
+          <div className={styles.menuGroup} role="group" aria-label="Вид интерфейса">
+            <span className={styles.menuLabel}>
+              <Sparkles size={14} aria-hidden="true" />
+              Интерфейс
+            </span>
+            {UI_MODES.map((m) => (
+              <button key={m.value} type="button" role="menuitemradio" aria-checked={mode === m.value} className={`${styles.menuItem} ${styles.themeItem}`} onClick={() => setMode(m.value)} title={m.hint}>
+                <i className={`${styles.swatch} ${m.value === 'pro' ? styles.swatch_pro : styles.swatch_basic}`} aria-hidden="true" />
+                {m.label}
+                {mode === m.value && <Check size={15} className={styles.themeCheck} aria-hidden="true" />}
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             role="menuitem"
@@ -151,13 +197,31 @@ function UserMenu() {
   );
 }
 
+const CommandPalette = lazy(() => import('../CommandPalette/CommandPalette'));
+
 export function AppLayout() {
   const { can } = useAuth();
   const scope = useScope();
   const [navOpen, setNavOpen] = useState(false);
   const location = useLocation();
+  const { live } = useLiveUpdates();
+  const { mode } = useUiMode();
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   useEffect(() => setNavOpen(false), [location.pathname]);
+
+  // палитра команд есть только в расширенном виде
+  useEffect(() => {
+    if (mode !== 'pro') return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [mode]);
 
   return (
     <div className={styles.shell}>
@@ -210,13 +274,34 @@ export function AppLayout() {
             </Select>
           </div>
           <div className={styles.spacer} />
+          {mode === 'pro' && (
+            <button type="button" className={styles.paletteButton} onClick={() => setPaletteOpen(true)} aria-label="Быстрый переход" title="Быстрый переход (Ctrl+K)">
+              <Search size={15} aria-hidden="true" />
+              <span>Быстрый переход</span>
+              <kbd>Ctrl K</kbd>
+            </button>
+          )}
           <OfflineStatus />
+          <NavLink to="/guide" className={styles.guideLink} title="Руководство пользователя">
+            <BookOpen size={16} aria-hidden="true" />
+            <span>Руководство</span>
+          </NavLink>
+          <span className={`${styles.live} ${live ? styles.liveOn : ''}`} title={live ? 'Данные обновляются сразу, как только что-то изменилось' : 'Живое обновление не подключено, данные обновляются раз в минуту'}>
+            <i aria-hidden="true" />
+            {live ? 'Обновляется сразу' : 'Без живого обновления'}
+          </span>
           <span className={styles.today}>{fmtLongDate(new Date().toISOString())}</span>
           <UserMenu />
         </header>
         <main id="main" className={styles.content} tabIndex={-1}>
           <Outlet />
         </main>
+        <TeamBanner />
+        {mode === 'pro' && paletteOpen && (
+          <Suspense fallback={null}>
+            <CommandPalette onClose={() => setPaletteOpen(false)} />
+          </Suspense>
+        )}
       </div>
     </div>
   );

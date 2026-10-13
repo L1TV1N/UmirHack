@@ -1,10 +1,15 @@
-import type { StopListDto, StopListEntryDto, StopReason } from '@zapas/shared';
-import { sql } from 'kysely';
+import type { StopForecastDto, StopListDto, StopListEntryDto, StopReason } from '@zapas/shared';
+import { sql, type Transaction } from 'kysely';
 import { evaluateAutoStops, type AutoStop } from '../../domain/stoplist';
+import { forecastStopList } from '../../domain/stoplist-forecast';
 import type { Db } from '../../db/client';
+import type { Database } from '../../db/types';
+import { hubFor } from '../../lib/events';
 import { retryOnConflict } from '../../lib/retry';
-import type { Deps } from '../../lib/context';
-import { escapeHtml } from '../notifications/notifier';
+import type { Deps, Principal } from '../../lib/context';
+import { assertLocation, locationFilter } from '../../lib/scope';
+import { businessHour } from '../../lib/time';
+import { newStopsText, notifyStopListSubscribers } from '../telegram/delivery';
 import { getSnapshot, restrictSnapshot, type Snapshot } from '../analytics/snapshot';
 import { publishStopList } from '../integrations/service';
 
@@ -141,13 +146,51 @@ async function writeStopState(deps: Deps, snap: Snapshot): Promise<SyncResult> {
       }
     }
     for (const s of inserted) sinceMap.set(stateKey(s), now);
+    await trackShortages(trx, mine, writable, now);
     for (const id of writable) newest.set(id, snap.seq);
     return { added: inserted, since: sinceMap };
   }));
 
   const reportable = added.filter((a) => !baselined.has(a.locationId));
   if (reportable.length > 0 && deps.notifier.enabled) await notifyNewStops(deps, reportable);
+  if (reportable.length > 0) await notifyStopListSubscribers(deps, reportable);
   return { stops, warnings, since };
+}
+
+/**
+ * Ведёт историю дефицита: продукт на точке «в дефиците», пока он назван причиной остановки блюда или сам в стопе.
+ * Эпизод открывается при появлении и закрывается при исчезновении, по ним строится статистика дефицитных ингредиентов.
+ */
+async function trackShortages(trx: Transaction<Database>, stops: AutoStop[], writable: Set<string>, now: Date): Promise<void> {
+  if (writable.size === 0) return;
+  const scarce = new Map<string, { locationId: string; productId: string; dishes: Set<string> }>();
+  const mark = (locationId: string, productId: string, dishId: string | null) => {
+    const key = `${locationId}:${productId}`;
+    const item = scarce.get(key) ?? { locationId, productId, dishes: new Set<string>() };
+    if (dishId) item.dishes.add(dishId);
+    scarce.set(key, item);
+  };
+  for (const s of stops) {
+    if (s.entityType === 'product') mark(s.locationId, s.entityId, null);
+    else for (const r of s.reasons) for (const m of r.missing ?? []) mark(s.locationId, m.productId, s.entityId);
+  }
+
+  const open = await trx
+    .selectFrom('shortage_episodes')
+    .select(['id', 'location_id', 'product_id', 'dishes_blocked'])
+    .where('ended_at', 'is', null)
+    .where('location_id', 'in', [...writable])
+    .execute();
+  const openKeys = new Set<string>();
+  for (const e of open) {
+    const key = `${e.location_id}:${e.product_id}`;
+    openKeys.add(key);
+    const current = scarce.get(key);
+    if (!current) await trx.updateTable('shortage_episodes').set({ ended_at: now }).where('id', '=', e.id).execute();
+    else if (current.dishes.size > e.dishes_blocked) await trx.updateTable('shortage_episodes').set({ dishes_blocked: current.dishes.size }).where('id', '=', e.id).execute();
+  }
+  const started = [...scarce].filter(([key]) => !openKeys.has(key)).map(([, v]) => ({ location_id: v.locationId, product_id: v.productId, started_at: now, dishes_blocked: v.dishes.size }));
+  if (started.length > 0) await trx.insertInto('shortage_episodes').values(started).onConflict((oc) => oc.doNothing()).execute();
 }
 
 /**
@@ -169,12 +212,8 @@ async function ensureBaseline(deps: Deps, scope: string[], now: Date): Promise<S
 }
 
 async function notifyNewStops(deps: Deps, reportable: AutoStop[]): Promise<void> {
-  const lines = reportable.slice(0, 15).map(
-    (a) => `• <b>${escapeHtml(a.name)}</b> (${escapeHtml(a.locationName)}): ${escapeHtml(a.reasons[0]?.text ?? '')}`,
-  );
-  const more = reportable.length > 15 ? `\nи ещё ${reportable.length - 15}` : '';
   try {
-    await deps.notifier.send(`<b>Новые позиции в стоп-листе</b>\n${lines.join('\n')}${more}`);
+    await deps.notifier.send(newStopsText(reportable));
   } catch (err) {
     deps.log.error({ err }, 'не удалось отправить уведомление о стоп-листе');
   }
@@ -286,6 +325,7 @@ async function runPending(deps: Deps, st: SyncState): Promise<void> {
   if (ids.length === 0) return;
   try {
     await syncStopList(deps, ids, undefined, true);
+    hubFor(deps.db).publish();
     await publishStopList(deps, ids);
   } catch (err) {
     deps.log.error({ err }, 'не удалось пересчитать стоп-лист');
@@ -317,4 +357,28 @@ export async function drainStopListSync(deps: Deps): Promise<void> {
     if (!st.running && st.pending.size > 0) st.running = runPending(deps, st).finally(() => (st.running = null));
     await st.running;
   }
+}
+
+
+/** Когда блюда кухонь перестанут готовиться при текущих продажах. Блюда и продукты из стоп-листа пропускаются. */
+export async function getStopForecast(deps: Deps, principal: Principal, requestedLocation?: string): Promise<StopForecastDto[]> {
+  const allowed = locationFilter(principal);
+  if (requestedLocation) assertLocation(principal, requestedLocation);
+  const scopeIds = requestedLocation ? [requestedLocation] : allowed;
+  const snap = await getSnapshot(deps, allowed);
+  const current = await getStopList(deps, scopeIds, snap);
+  const stopped = new Set(current.entries.filter((e) => e.entityType === 'dish').map((e) => `${e.entityId}|${e.locationId}`));
+  const blockedProducts = new Set(current.entries.filter((e) => e.entityType === 'product').map((e) => `${e.entityId}|${e.locationId}`));
+  const now = deps.clock().getTime();
+  return forecastStopList({
+    locations: new Map([...snap.locations].filter(([id]) => !scopeIds || scopeIds.includes(id))),
+    products: snap.products,
+    dishes: snap.dishes,
+    batches: snap.batches,
+    velocities: snap.velocities,
+    stock: snap.stock,
+    nowHour: businessHour(deps),
+    stopped,
+    blockedProducts,
+  }).map((f) => ({ ...f, expectedAt: new Date(now + f.hoursLeft * 3_600_000).toISOString() }));
 }

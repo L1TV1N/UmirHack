@@ -31,7 +31,7 @@ export default function ProductsPage() {
   const tab: Tab = url.tab === 'categories' || url.tab === 'suppliers' ? url.tab : 'products';
 
   useEffect(() => {
-    document.title = 'Номенклатура — Запас';
+    document.title = 'Номенклатура - Запас';
   }, []);
   useEffect(() => {
     if (debounced !== url.q) setUrl({ q: debounced });
@@ -61,9 +61,9 @@ export default function ProductsPage() {
     { key: 'cat', header: 'Категория', cell: (p) => p.categoryName },
     { key: 'unit', header: 'Ед.', cell: (p) => UNIT_LABELS[p.unit] },
     { key: 'cost', header: 'Себестоимость', align: 'right', cell: (p) => <span className="num">{formatMoney(p.cost)}</span> },
-    { key: 'price', header: 'Цена', align: 'right', cell: (p) => (p.sellable ? <span className="num">{formatMoney(p.price)}</span> : <span className="muted">—</span>) },
-    { key: 'min', header: 'Минимум', align: 'right', cell: (p) => (p.minStock > 0 ? <span className="num">{formatQty(p.minStock, p.unit)}</span> : <span className="muted">—</span>) },
-    { key: 'shelf', header: 'Срок, суток', align: 'right', cell: (p) => (p.shelfLifeDays ? <span className="num">{p.shelfLifeDays}</span> : <span className="muted">—</span>) },
+    { key: 'price', header: 'Цена', align: 'right', cell: (p) => (p.sellable ? <span className="num">{formatMoney(p.price)}</span> : <span className="muted">-</span>) },
+    { key: 'min', header: 'Минимум', align: 'right', cell: (p) => (p.minStock > 0 ? <span className="num">{formatQty(p.minStock, p.unit)}</span> : <span className="muted">-</span>) },
+    { key: 'shelf', header: 'Срок, суток', align: 'right', cell: (p) => (p.shelfLifeDays ? <span className="num">{p.shelfLifeDays}</span> : <span className="muted">-</span>) },
     {
       key: 'state',
       header: 'Статус',

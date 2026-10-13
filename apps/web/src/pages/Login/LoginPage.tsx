@@ -6,6 +6,7 @@ import { useAuth } from '../../auth/AuthProvider';
 import { Button } from '../../components/Button/Button';
 import { Field, Input } from '../../components/Controls/Controls';
 import { BrandMark } from '../../components/Layout/Brand';
+import { TeamMark } from '../../components/TeamBanner/TeamMark';
 import styles from './LoginPage.module.scss';
 
 export default function LoginPage() {
@@ -19,7 +20,7 @@ export default function LoginPage() {
   const passwordRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    document.title = 'Вход — Запас';
+    document.title = 'Вход - Запас';
   }, []);
 
   if (status === 'authenticated') {
@@ -69,7 +70,13 @@ export default function LoginPage() {
             <li>Рекомендации: списать, уценить, переместить, заказать</li>
           </ul>
         </div>
-        <div className={styles.foot}>Все действия пользователей фиксируются в журнале.</div>
+        <div className={styles.foot}>
+          <span className={styles.team}>
+            <TeamMark size={22} />
+            Сделано командой CyberPink228
+          </span>
+          <span>Все действия пользователей фиксируются в журнале.</span>
+        </div>
       </section>
 
       <section className={styles.formSide}>

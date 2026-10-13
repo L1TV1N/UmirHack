@@ -3,11 +3,12 @@ import { hasForbiddenChars } from './schemas';
 import type { Unit } from './enums';
 
 /** События, на которые можно подписать адрес. Служебное «ping» отправляется только кнопкой «Проверить». */
-export const WEBHOOK_EVENTS = ['stoplist.changed', 'order.sent'] as const;
+export const WEBHOOK_EVENTS = ['stoplist.changed', 'order.sent', 'promotion.changed'] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 export const WEBHOOK_EVENT_LABELS: Record<WebhookEvent, string> = {
   'stoplist.changed': 'Стоп-лист изменился',
   'order.sent': 'Заказ поставщику отправлен',
+  'promotion.changed': 'Скидка на партию изменилась',
 };
 
 export const WEBHOOK_MAX_ENDPOINTS = 20;
@@ -126,12 +127,35 @@ export interface StopListChangedPayload {
   truncated: boolean;
 }
 
+/** Скидка на партию, по которой касса продаст следующую единицу товара. */
+export interface MarkdownDto {
+  percent: number;
+  /** Цена со скидкой. */
+  price: number;
+  /** Скидка действует до конца этого дня, обычно это последний день срока партии. */
+  endsOn: string;
+  /** Сколько товара осталось в уценённой партии. */
+  quantity: number;
+}
+
+/** Событие «скидка изменилась»: касса обновляет цену, markdown равен null, когда скидку отменили. */
+export interface PromotionChangedPayload {
+  event: 'promotion.changed';
+  locationId: string;
+  locationName: string;
+  createdAt: string;
+  product: { sku: string; barcode: string | null; name: string; unit: Unit; price: number };
+  markdown: MarkdownDto | null;
+}
+
 export interface PosProductDto {
   sku: string;
   barcode: string | null;
   name: string;
   unit: Unit;
   price: number;
+  /** Скидка, действующая сейчас на ближайшую по сроку партию на точке кассы. Касса продаёт по ней, пока партия не кончится. */
+  markdown: MarkdownDto | null;
   sellable: boolean;
   isActive: boolean;
 }

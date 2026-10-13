@@ -11,6 +11,7 @@ export const DEFAULT_SETTINGS: SettingsBody = {
   lowPortionThreshold: 3,
   digestHour: 8,
   useDemandModel: true,
+  autoWriteoffExpired: false,
 };
 
 const KEY = 'app';

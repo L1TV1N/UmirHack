@@ -15,8 +15,8 @@
   align-items: flex-start;
   gap: 10px;
   padding: 11px 12px 11px 14px;
-  background: var(--ink-900);
-  color: var(--white);
+  background: var(--fixed-dark);
+  color: var(--fixed-light);
   border-radius: var(--radius);
   box-shadow: var(--shadow-pop);
   font-weight: 600;
@@ -46,7 +46,7 @@
     line-height: 1;
 
     &:hover {
-      color: var(--white);
+      color: var(--fixed-light);
     }
   }
 }

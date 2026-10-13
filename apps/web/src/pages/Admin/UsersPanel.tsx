@@ -230,7 +230,7 @@ export function UsersPanel() {
     {
       key: 'locs',
       header: 'Точки',
-      cell: (u) => (seesAllLocations(u.role) ? <span className="muted">все</span> : u.locationIds.length ? u.locationIds.map((id) => names.get(id) ?? '—').join(', ') : <span className="muted">не назначены</span>),
+      cell: (u) => (seesAllLocations(u.role) ? <span className="muted">все</span> : u.locationIds.length ? u.locationIds.map((id) => names.get(id) ?? '-').join(', ') : <span className="muted">не назначены</span>),
     },
     {
       key: 'state',

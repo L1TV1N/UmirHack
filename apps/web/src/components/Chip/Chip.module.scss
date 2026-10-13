@@ -11,7 +11,13 @@
   font-size: 12px;
   font-weight: 700;
   line-height: 1.2;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+
+  &.long {
+    white-space: normal;
+    overflow-wrap: break-word;
+    text-align: left;
+  }
 }
 
 .dot {
@@ -48,13 +54,13 @@
 .warn {
   background: var(--warn-50);
   border-color: var(--warn-200);
-  color: #9a3412;
+  color: var(--warn-ink);
 }
 
 .danger {
   background: var(--danger-50);
   border-color: var(--danger-200);
-  color: #991b1b;
+  color: var(--danger-ink);
 }
 
 .life {

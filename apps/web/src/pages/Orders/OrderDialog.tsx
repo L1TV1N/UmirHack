@@ -206,12 +206,12 @@ export function OrderDialog({ orderId, onClose }: { orderId: string | null; onCl
             </div>
             <div>
               <dt>Отправлен</dt>
-              <dd>{order.sentAt ? fmtDateTime(order.sentAt) : '—'}</dd>
+              <dd>{order.sentAt ? fmtDateTime(order.sentAt) : '-'}</dd>
             </div>
             <div>
               <dt>Письмо поставщику</dt>
               <dd>
-                {order.emailedAt ? <Chip tone="ok">отправлено {fmtDateTime(order.emailedAt)}</Chip> : order.emailError ? <Chip tone="amber">{order.emailError}</Chip> : <span className="muted">{draft ? 'уйдёт при отправке' : '—'}</span>}
+                {order.emailedAt ? <Chip tone="ok">отправлено {fmtDateTime(order.emailedAt)}</Chip> : order.emailError ? <Chip tone="amber">{order.emailError}</Chip> : <span className="muted">{draft ? 'уйдёт при отправке' : '-'}</span>}
               </dd>
             </div>
           </dl>
@@ -260,7 +260,7 @@ export function OrderDialog({ orderId, onClose }: { orderId: string | null; onCl
                         <td className={styles.num}>{formatQty(l.quantity, l.unit)}</td>
                         <td className={styles.num}>{formatMoney(l.unitCost)}</td>
                         <td className={styles.num}>{formatMoney(l.sum)}</td>
-                        <td className={styles.num}>{l.receivedQty > 0 ? <Chip tone={l.receivedQty >= l.quantity ? 'ok' : 'amber'}>{formatQty(l.receivedQty, l.unit)}</Chip> : <span className="muted">—</span>}</td>
+                        <td className={styles.num}>{l.receivedQty > 0 ? <Chip tone={l.receivedQty >= l.quantity ? 'ok' : 'amber'}>{formatQty(l.receivedQty, l.unit)}</Chip> : <span className="muted">-</span>}</td>
                       </tr>
                     ))}
               </tbody>

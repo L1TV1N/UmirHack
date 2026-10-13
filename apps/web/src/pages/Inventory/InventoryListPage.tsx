@@ -39,7 +39,7 @@ export default function InventoryListPage() {
   const create = useAction((body: object) => post<InventoryDto>('/inventories', body), ['/inventories']);
 
   useEffect(() => {
-    document.title = 'Инвентаризация — Запас';
+    document.title = 'Инвентаризация - Запас';
   }, []);
 
   const options = scope.activeLocations;
@@ -80,7 +80,7 @@ export default function InventoryListPage() {
       ),
     },
     { key: 'author', header: 'Автор', cell: (i) => i.authorName },
-    { key: 'closed', header: 'Проведена', cell: (i) => (i.committedAt ? <span className="num">{fmtDateTime(i.committedAt)}</span> : <span className="muted">—</span>) },
+    { key: 'closed', header: 'Проведена', cell: (i) => (i.committedAt ? <span className="num">{fmtDateTime(i.committedAt)}</span> : <span className="muted">-</span>) },
     { key: 'comment', header: 'Комментарий', cell: (i) => <span className="muted">{i.comment ?? ''}</span> },
   ];
 

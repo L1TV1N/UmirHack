@@ -47,7 +47,7 @@ function hashEntry(f: HashFields): string {
 export async function writeAudit(executor: Executor, input: AuditInput): Promise<void> {
   const principal = input.principal ?? null;
   const userId = principal?.kind === 'user' ? principal.id : null;
-  const email = principal?.kind === 'user' ? principal.email : (input.email ?? null);
+  const email = principal?.kind === 'user' ? principal.email : principal?.kind === 'system' ? 'система' : (input.email ?? null);
   const at = input.at ?? new Date();
   const details = JSON.parse(JSON.stringify(input.details ?? {})) as unknown;
   const ip = input.meta?.ip ?? null;

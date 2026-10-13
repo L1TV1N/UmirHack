@@ -13,8 +13,11 @@ import { Chip } from '../../components/Chip/Chip';
 import { ExpiryBars, KpiStrip, TrendChart } from '../../components/Charts/Charts';
 import { EmptyState, ErrorNote, Loading } from '../../components/Feedback/Feedback';
 import { Panel, PageHeader } from '../../components/Panel/Panel';
+import { HotDishItem } from '../../components/Recommendation/HotDishItem';
 import { RecoItem } from '../../components/Recommendation/RecoItem';
 import { fmtDateTime } from '../../lib/format';
+import { RescuedPanel } from './RescuedPanel';
+import { ShortagePanel } from './ShortagePanel';
 import styles from './DashboardPage.module.scss';
 
 export default function DashboardPage() {
@@ -24,7 +27,7 @@ export default function DashboardPage() {
   const d = query.data;
 
   useEffect(() => {
-    document.title = 'Обзор — Запас';
+    document.title = 'Обзор - Запас';
   }, []);
 
   // чистая установка: показывать нули по пустой системе незачем, лучше подсказать, с чего начать
@@ -111,6 +114,22 @@ export default function DashboardPage() {
                 )}
               </Panel>
 
+              {d.hotDishes.length > 0 && (
+                <Panel
+                  title="Горячие предложения"
+                  subtitle="Что продвигать, пока не истёк срок ингредиентов"
+                  actions={<Link to="/hot-dishes">Весь список</Link>}
+                >
+                  <ul className={styles.list}>
+                    {d.hotDishes.map((h) => (
+                      <HotDishItem key={`${h.dishId}|${h.locationId}`} dish={h} compact />
+                    ))}
+                  </ul>
+                </Panel>
+              )}
+
+              <RescuedPanel locationId={scope.locationId} />
+
               <Panel title="Списания за 30 дней" subtitle="Сколько денег ушло по себестоимости" padded>
                 <TrendChart points={d.writeoffTrend} />
                 {d.writeoffByReason.length > 0 && (
@@ -150,6 +169,8 @@ export default function DashboardPage() {
                   </ul>
                 )}
               </Panel>
+
+              <ShortagePanel locationId={scope.locationId} />
             </div>
           </div>
         </>

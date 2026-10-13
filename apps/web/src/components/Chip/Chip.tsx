@@ -8,9 +8,12 @@ import styles from './Chip.module.scss';
 
 export type Tone = 'neutral' | 'info' | 'ok' | 'amber' | 'warn' | 'danger';
 
+const textLength = (node: ReactNode): number => (typeof node === 'string' || typeof node === 'number' ? String(node).length : Array.isArray(node) ? node.reduce<number>((n, c) => n + textLength(c as ReactNode), 0) : 0);
+
+/** Короткая метка остаётся в одну строку, длинная (причина, ошибка) переносится. */
 export function Chip({ tone = 'neutral', dot, children, title }: { tone?: Tone; dot?: boolean; children: ReactNode; title?: string }) {
   return (
-    <span className={`${styles.chip} ${styles[tone]}`} {...(title ? { title } : {})}>
+    <span className={`${styles.chip} ${styles[tone]} ${textLength(children) > 28 ? styles.long : ''}`} {...(title ? { title } : {})}>
       {dot && <span className={styles.dot} aria-hidden="true" />}
       {children}
     </span>

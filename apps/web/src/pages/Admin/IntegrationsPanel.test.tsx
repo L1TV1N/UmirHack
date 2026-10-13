@@ -84,7 +84,7 @@ describe('адреса для событий', () => {
     fireEvent.change(screen.getByLabelText(/Название/), { target: { value: 'Яндекс Еда' } });
     fireEvent.change(screen.getByLabelText(/Адрес приёмника/), { target: { value: 'https://example.ru/hook' } });
     fireEvent.click(screen.getByRole('button', { name: 'Создать' }));
-    await waitFor(() => expect(post).toHaveBeenCalledWith('/integrations/webhooks', { name: 'Яндекс Еда', url: 'https://example.ru/hook', events: ['stoplist.changed', 'order.sent'], locationId: null }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith('/integrations/webhooks', { name: 'Яндекс Еда', url: 'https://example.ru/hook', events: ['stoplist.changed', 'order.sent', 'promotion.changed'], locationId: null }));
     const secret = (await screen.findByLabelText('Секрет')) as HTMLInputElement;
     expect(secret.value).toBe('whsec_TESTSECRET');
     fireEvent.click(screen.getByRole('button', { name: 'Я сохранил секрет' }));
@@ -107,6 +107,7 @@ describe('адреса для событий', () => {
     fireEvent.change(screen.getByLabelText(/Адрес приёмника/), { target: { value: 'https://example.ru/hook' } });
     fireEvent.click(screen.getByLabelText('Стоп-лист изменился'));
     fireEvent.click(screen.getByLabelText('Заказ поставщику отправлен'));
+    fireEvent.click(screen.getByLabelText('Скидка на партию изменилась'));
     fireEvent.click(screen.getByRole('button', { name: 'Создать' }));
     expect(await screen.findByText('Выберите хотя бы одно событие')).toBeTruthy();
     expect(post).not.toHaveBeenCalled();

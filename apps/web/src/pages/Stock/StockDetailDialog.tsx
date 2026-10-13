@@ -22,6 +22,7 @@ import { DataTable, type Column } from '../../components/DataTable/DataTable';
 import { Dialog } from '../../components/Dialog/Dialog';
 import { ErrorNote } from '../../components/Feedback/Feedback';
 import { fmtDate, fmtDateTime } from '../../lib/format';
+import { DemandSection } from './DemandSection';
 import styles from './StockPage.module.scss';
 
 export function StockDetailDialog({ row, onClose }: { row: StockRowDto | null; onClose: () => void }) {
@@ -65,7 +66,7 @@ export function StockDetailDialog({ row, onClose }: { row: StockRowDto | null; o
       align: 'right',
       cell: (b) => {
         const r = risk.get(b.id) ?? 0;
-        return r > 0 ? <span className={b.daysLeft < 0 ? styles.bad : ''}>{formatQty(r, b.unit)}</span> : <span className="muted">—</span>;
+        return r > 0 ? <span className={b.daysLeft < 0 ? styles.bad : ''}>{formatQty(r, b.unit)}</span> : <span className="muted">-</span>;
       },
     },
     { key: 'cost', header: 'Себест.', align: 'right', cell: (b) => <span className="num">{formatMoney(b.unitCost)}</span> },
@@ -129,7 +130,7 @@ export function StockDetailDialog({ row, onClose }: { row: StockRowDto | null; o
               </div>
               <div>
                 <dt>Минимум</dt>
-                <dd className="num">{row.minStock > 0 ? formatQty(row.minStock, row.unit) : '—'}</dd>
+                <dd className="num">{row.minStock > 0 ? formatQty(row.minStock, row.unit) : '-'}</dd>
               </div>
               <div>
                 <dt>Расход в сутки</dt>
@@ -137,7 +138,7 @@ export function StockDetailDialog({ row, onClose }: { row: StockRowDto | null; o
               </div>
               <div>
                 <dt>Хватит на</dt>
-                <dd className="num">{f ? (f.daysToZero === null ? '—' : `${formatNumber(f.daysToZero)} дн.`) : '…'}</dd>
+                <dd className="num">{f ? (f.daysToZero === null ? '-' : `${formatNumber(f.daysToZero)} дн.`) : '…'}</dd>
               </div>
               <div>
                 <dt>Стоимость</dt>
@@ -167,6 +168,8 @@ export function StockDetailDialog({ row, onClose }: { row: StockRowDto | null; o
                 <p className="muted">{forecast.isError ? 'Прогноз недоступен' : 'Считаем…'}</p>
               )}
             </div>
+
+            {can('storekeeper') && <DemandSection key={`${row.productId}|${row.locationId}`} row={row} />}
 
             <div className={styles.section}>
               <h3>Последние движения</h3>

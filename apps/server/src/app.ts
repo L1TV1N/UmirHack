@@ -14,9 +14,13 @@ import {
 import type { Deps } from './lib/context';
 import { adminRoutes } from './modules/admin/routes';
 import { invoiceRoutes } from './modules/invoices/routes';
+import { eventRoutes } from './modules/events/routes';
+import { haccpRoutes } from './modules/haccp/routes';
 import { forecastRoutes } from './modules/forecast/routes';
 import { catalogImportRoutes } from './modules/catalog/import-routes';
 import { integrationRoutes } from './modules/integrations/routes';
+import { exchangeRoutes } from './modules/exchange/routes';
+import { posRoutes } from './modules/pos/routes';
 import { orderRoutes } from './modules/orders/routes';
 import { traceabilityRoutes } from './modules/traceability/routes';
 import { telegramRoutes } from './modules/telegram/routes';
@@ -126,8 +130,12 @@ export async function buildApp(input: Omit<Deps, 'log'>): Promise<FastifyInstanc
       await api.register(invoiceRoutes(deps));
       await api.register(traceabilityRoutes(deps));
       await api.register(integrationRoutes(deps));
+      await api.register(exchangeRoutes(deps));
+      await api.register(posRoutes(deps));
       await api.register(orderRoutes(deps));
       await api.register(forecastRoutes(deps));
+      await api.register(eventRoutes(deps));
+      await api.register(haccpRoutes(deps));
     },
     { prefix: '/api' },
   );

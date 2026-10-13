@@ -67,3 +67,112 @@
   --topbar-height: 56px;
   --content-max: 1360px;
 }
+
+// Цвета, которые не зависят от темы: тёмные плашки, подписи на цветных кнопках, текст на тёмном фоне
+:root {
+  --fixed-dark: #111827;
+  --fixed-light: #ffffff;
+  --danger-ink: #991b1b;
+  --warn-ink: #9a3412;
+  --scrim: rgba(17, 24, 39, 0.5);
+  --topbar-glow: none;
+  --body-bg: var(--surface-50);
+  color-scheme: light;
+}
+
+// Тёмная тема: поверхности и текст меняются местами, смысловые цвета остаются узнаваемыми
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --brand-50: #0c2a3d;
+  --brand-100: #0f3a55;
+  --brand-200: #135070;
+  --brand-300: #1d6f9a;
+  --brand-400: #3a9fd4;
+  --brand-500: #2ba3e0;
+  --brand-600: #1a7fbd;
+  --brand-700: #3b9ddb;
+  --brand-800: #a9ddf6;
+  --brand-900: #d3eefb;
+
+  --graphite: #9ca3af;
+  --ink-900: #f1f5f9;
+  --ink-800: #e2e8f0;
+  --ink-700: #cbd5e1;
+  --ink-600: #aab4c3;
+  --ink-500: #8b97a8;
+  --ink-400: #667386;
+  --ink-300: #3a4558;
+  --line: #2a3446;
+  --line-soft: #222b3b;
+  --surface-100: #1e2635;
+  --surface-50: #0f1520;
+  --white: #171e2c;
+
+  --ok-50: #0f2a1e;
+  --ok-200: #1d5a3b;
+  --ok-600: #34d399;
+  --ok-700: #6ee7b7;
+  --warn-50: #33190b;
+  --warn-200: #7c3a12;
+  --warn-600: #fb923c;
+  --warn-700: #fdba74;
+  --amber-50: #2e2508;
+  --amber-200: #6b5410;
+  --amber-500: #facc15;
+  --amber-600: #fbbf24;
+  --amber-700: #fde68a;
+  --danger-50: #35151a;
+  --danger-200: #7f2a30;
+  --danger-600: #f87171;
+  --danger-700: #fca5a5;
+  --danger-ink: #fecaca;
+  --warn-ink: #fed7aa;
+
+  --fixed-dark: #0a0f18;
+  --scrim: rgba(0, 0, 0, 0.65);
+  --shadow-pop: 0 10px 30px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
+  --focus: 0 0 0 3px rgba(77, 180, 232, 0.4);
+}
+
+// Цветная тема: розово-фиолетовая с бирюзовыми акцентами, как у команды CyberPink228
+:root[data-theme='colorful'] {
+  --brand-50: #fdeaf6;
+  --brand-100: #fbd3ec;
+  --brand-200: #f6a8d9;
+  --brand-300: #ef78c3;
+  --brand-400: #e648b0;
+  --brand-500: #d6269c;
+  --brand-600: #bd1a88;
+  --brand-700: #9c1570;
+  --brand-800: #77115a;
+  --brand-900: #520c3f;
+
+  --graphite: #7a6a85;
+  --ink-900: #24103a;
+  --ink-800: #33194f;
+  --ink-700: #4a2d68;
+  --ink-600: #66487f;
+  --ink-500: #80649a;
+  --ink-400: #a58db8;
+  --ink-300: #d9c9e6;
+  --line: #eadcf3;
+  --line-soft: #f3eaf9;
+  --surface-100: #f5e9fb;
+  --surface-50: #fbf4ff;
+  --white: #ffffff;
+
+  --ok-600: #0e9f8e;
+  --ok-700: #0b7f72;
+  --ok-50: #e3faf6;
+  --ok-200: #9cebdd;
+  --warn-600: #f26a1b;
+  --amber-600: #d99a00;
+  --danger-600: #e11d48;
+  --danger-700: #be123c;
+
+  --fixed-dark: #2a0f4a;
+  --shadow-pop: 0 10px 30px rgba(110, 30, 140, 0.22), 0 2px 6px rgba(110, 30, 140, 0.12);
+  --focus: 0 0 0 3px rgba(214, 38, 156, 0.3);
+  --topbar-glow: linear-gradient(90deg, #ff3fb0, #8a4dff, #19c6e6, #ffd23f);
+  --body-bg: linear-gradient(180deg, #fff1fa 0, #f6eeff 280px, #fbf4ff 560px);
+}

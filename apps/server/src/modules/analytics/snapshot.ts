@@ -1,5 +1,6 @@
 import { addDays, daysBetween, toMilli, type SettingsBody } from '@zapas/shared';
 import type { Db } from '../../db/client';
+import { hubFor } from '../../lib/events';
 import { SnapshotCache } from '../../lib/snapshot-cache';
 import { sql } from 'kysely';
 import { observedDays, velocityFromWeightedSum } from '../../domain/forecast';
@@ -249,6 +250,7 @@ export function cachedAggregate<T>(deps: Deps, key: string, load: () => Promise<
 export function invalidateSnapshots(db: Db): void {
   cacheFor(db).invalidate();
   aggregates.get(db)?.invalidate();
+  hubFor(db).publish();
 }
 
 /**

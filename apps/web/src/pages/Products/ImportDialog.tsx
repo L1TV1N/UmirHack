@@ -158,7 +158,7 @@ export function ImportDialog({ open, onClose }: { open: boolean; onClose: () => 
                   <div key={r.line} className={styles.row} role="row">
                     <span className={styles.line}>№ {r.line}</span>
                     <div className={styles.what}>
-                      <strong>{r.name ?? '—'}</strong>
+                      <strong>{r.name ?? '-'}</strong>
                       <small>{r.sku ?? 'без артикула'}</small>
                       <span>
                         <Chip tone={chip.tone}>{chip.label}</Chip>

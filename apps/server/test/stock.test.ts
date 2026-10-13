@@ -19,6 +19,45 @@ const sale = (token: string, locationId: string, lines: object[], key?: string) 
   call(env, token)('POST', '/api/documents/sales', { locationId, lines }, key ? { 'idempotency-key': key } : {});
 
 describe('приход', () => {
+  describe('срок годности', () => {
+    const receipt = (productId: string, line: object) =>
+      call(env, w.keeperA.token)('POST', '/api/documents/receipts', { locationId: w.locA.id, lines: [{ productId, quantity: 5, unitCost: 60, ...line }] });
+    const expiry = async (productId: string) =>
+      (await env.db.selectFrom('batches').select('expires_on').where('product_id', '=', productId).executeTakeFirstOrThrow()).expires_on;
+
+    it('считает дату от срока хранения в днях, как в поставке из кейса', async () => {
+      const p = await addProduct(env, w.categoryId, { name: 'Кефир', unit: 'l' });
+      const res = await receipt(p, { shelfLifeDays: 4 });
+      expect(res.statusCode).toBe(201);
+      expect(await expiry(p)).toBe(w.day(4));
+    });
+
+    it('берёт срок из карточки продукта, если в строке его нет', async () => {
+      const p = await addProduct(env, w.categoryId, { name: 'Творог', shelfLifeDays: 6 });
+      const res = await receipt(p, {});
+      expect(res.statusCode).toBe(201);
+      expect(await expiry(p)).toBe(w.day(6));
+    });
+
+    it('срок в строке главнее срока в карточке', async () => {
+      const p = await addProduct(env, w.categoryId, { name: 'Сметана', shelfLifeDays: 6 });
+      expect((await receipt(p, { shelfLifeDays: 2 })).statusCode).toBe(201);
+      expect(await expiry(p)).toBe(w.day(2));
+    });
+
+    it('отказывает, если срока нет ни в строке, ни в карточке', async () => {
+      const p = await addProduct(env, w.categoryId, { name: 'Сыр' });
+      const res = await receipt(p, {});
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error.code).toBe('shelf_life_required');
+    });
+
+    it('не принимает дату и срок хранения вместе', async () => {
+      const p = await addProduct(env, w.categoryId, { name: 'Йогурт' });
+      expect((await receipt(p, { expiresOn: w.day(3), shelfLifeDays: 3 })).statusCode).toBe(400);
+    });
+  });
+
   it('создаёт партию и движение, номер документа читаемый', async () => {
     const milk = await addProduct(env, w.categoryId, { name: 'Молоко 3,2%', unit: 'l' });
     const doc = await receive(env, w.keeperA.token, w.locA.id, [{ productId: milk, quantity: 24.5, expiresOn: w.day(5), unitCost: 61.9 }], {

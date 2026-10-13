@@ -13,7 +13,11 @@
     "test": "vitest run",
     "create-admin": "tsx src/db/create-admin-cli.ts",
     "barcodes": "tsx src/db/seed/barcodes-cli.ts",
-    "sample-upd": "tsx src/db/seed/upd-sample-cli.ts"
+    "sample-upd": "tsx src/db/seed/upd-sample-cli.ts",
+    "emulate": "tsx src/emulator/cli.ts",
+    "emulate:pos": "tsx src/emulator/pos-cli.ts",
+    "emulate:onec": "tsx src/emulator/onec-cli.ts",
+    "emulate:setup": "tsx src/emulator/setup-cli.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.132.1",
@@ -29,11 +33,13 @@
     "fastify": "^5.12.0",
     "fastify-plugin": "^5.1.0",
     "fastify-type-provider-zod": "^7.0.0",
+    "fetch-socks": "^1.3.3",
     "jose": "^6.2.0",
     "kysely": "^0.29.0",
     "nodemailer": "^10.0.16",
     "openapi-types": "^12.1.3",
     "pg": "^8.23.0",
+    "undici": "^8.11.2",
     "zod": "^4.6.0"
   },
   "devDependencies": {

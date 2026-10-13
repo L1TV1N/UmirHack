@@ -47,7 +47,7 @@ export default function TraceabilityPage() {
   const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
-    document.title = 'Прослеживаемость — Запас';
+    document.title = 'Прослеживаемость - Запас';
   }, []);
 
   const query = { ...(scope.locationId ? { locationId: scope.locationId } : {}), limit: LIMIT, offset };
@@ -108,7 +108,7 @@ export default function TraceabilityPage() {
         if (v.status === 'redeemed') {
           return (
             <>
-              <span>{v.redeemedAt ? fmtDateTime(v.redeemedAt) : '—'}</span>
+              <span>{v.redeemedAt ? fmtDateTime(v.redeemedAt) : '-'}</span>
               <span className={styles.sub}>{[v.redeemedBy, v.comment].filter(Boolean).join(' · ')}</span>
             </>
           );
@@ -168,7 +168,7 @@ export default function TraceabilityPage() {
       key: 'disposed',
       header: 'Должно выбыть',
       align: 'right',
-      cell: (m) => (m.disposed === null ? <span className="muted">—</span> : m.disposed > 0 ? <Chip tone="amber">{m.disposed} шт.</Chip> : <span className="muted">0</span>),
+      cell: (m) => (m.disposed === null ? <span className="muted">-</span> : m.disposed > 0 ? <Chip tone="amber">{m.disposed} шт.</Chip> : <span className="muted">0</span>),
     },
   ];
 

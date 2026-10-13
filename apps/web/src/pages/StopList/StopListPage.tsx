@@ -1,4 +1,4 @@
-import { formatQty, type DishDto, type ProductDto, type StopListDto, type StopListEntryDto } from '@zapas/shared';
+import { daysWord, formatQty, type DishDto, type ProductDto, type StopForecastDto, type StopListDto, type StopListEntryDto } from '@zapas/shared';
 import { Plus } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
 import { del, post } from '../../api/client';
@@ -6,7 +6,7 @@ import { useAction, useGet } from '../../api/hooks';
 import { useAuth } from '../../auth/AuthProvider';
 import { useScope } from '../../auth/ScopeProvider';
 import { Button } from '../../components/Button/Button';
-import { Chip } from '../../components/Chip/Chip';
+import { Chip, type Tone } from '../../components/Chip/Chip';
 import { Field, FieldRow, Input, Select } from '../../components/Controls/Controls';
 import { DataTable, type Column } from '../../components/DataTable/DataTable';
 import { Dialog } from '../../components/Dialog/Dialog';
@@ -21,6 +21,51 @@ import { fmtDateTime } from '../../lib/format';
 import styles from './StopListPage.module.scss';
 
 type Source = 'all' | 'auto' | 'manual';
+
+const FORECAST_SHOWN = 8;
+
+/** «Через 5 ч» или «через 2 дня»: на таком масштабе минуты не нужны. */
+function formatEta(hours: number): string {
+  if (hours < 1) return 'меньше чем через час';
+  if (hours < 24) return `через ${hours} ч`;
+  return `через ${daysWord(Math.round(hours / 24))}`;
+}
+
+function etaTone(hours: number): Tone {
+  if (hours < 24) return 'warn';
+  if (hours < 72) return 'amber';
+  return 'neutral';
+}
+
+function ForecastPanel({ items }: { items: StopForecastDto[] }) {
+  const shown = items.slice(0, FORECAST_SHOWN);
+  return (
+    <Panel
+      title="Прогноз стоп-листа"
+      subtitle="Когда блюда перестанут готовиться при текущих продажах, если новых поставок не будет"
+    >
+      <ul className={styles.forecast}>
+        {shown.map((f) => (
+          <li key={`${f.dishId}|${f.locationId}`}>
+            <div>
+              <strong>{f.dishName}</strong>
+              <span className={styles.sub}>
+                {f.locationName} · сейчас на {f.portionsNow} порц. ·{' '}
+                {f.cause === 'expiry'
+                  ? `закончится срок годности: ${f.limiting.productName}`
+                  : `ограничивает ${f.limiting.productName}: осталось ${formatQty(f.limiting.availableNow, f.limiting.unit)}${f.limiting.perDay ? `, уходит около ${formatQty(Math.round(f.limiting.perDay * 10) / 10, f.limiting.unit)} в сутки` : ''}`}
+              </span>
+            </div>
+            <span className={styles.eta} title={fmtDateTime(f.expectedAt)}>
+              <Chip tone={etaTone(f.hoursLeft)}>{formatEta(f.hoursLeft)}</Chip>
+            </span>
+          </li>
+        ))}
+      </ul>
+      {items.length > shown.length && <p className={styles.more}>и ещё {items.length - shown.length}</p>}
+    </Panel>
+  );
+}
 
 function AddDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const scope = useScope();
@@ -139,10 +184,11 @@ export default function StopListPage() {
   const [source, setSource] = useState<Source>('all');
   const [adding, setAdding] = useState(false);
   const query = useGet<StopListDto>('/stop-list', { locationId: scope.locationId }, { refetchInterval: 60_000 });
+  const forecast = useGet<StopForecastDto[]>('/stop-list/forecast', { locationId: scope.locationId }, { refetchInterval: 60_000 });
   const release = useAction((id: string) => del(`/stop-list/manual/${id}`), ['/stop-list', '/analytics']);
 
   useEffect(() => {
-    document.title = 'Стоп-лист — Запас';
+    document.title = 'Стоп-лист - Запас';
   }, []);
 
   const entries = (query.data?.entries ?? []).filter((e) => source === 'all' || e.source === source);
@@ -249,6 +295,13 @@ export default function StopListPage() {
             ))}
           </div>
         </Panel>
+      )}
+
+      {forecast.data && forecast.data.length > 0 && (
+        <>
+          <div style={{ height: 16 }} />
+          <ForecastPanel items={forecast.data} />
+        </>
       )}
 
       <div style={{ height: 16 }} />

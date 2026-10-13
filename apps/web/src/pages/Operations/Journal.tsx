@@ -8,12 +8,18 @@ import {
   type DocumentDetailDto,
   type DocumentDto,
   type DocumentKind,
+  type ExchangeDocKind,
+  type ExternalSystemDto,
   type MovementDto,
   type Page,
 } from '@zapas/shared';
+import { Download, Send } from 'lucide-react';
 import { useState } from 'react';
-import { useGet } from '../../api/hooks';
+import { downloadFile, post } from '../../api/client';
+import { useAction, useGet } from '../../api/hooks';
+import { useAuth } from '../../auth/AuthProvider';
 import { useScope } from '../../auth/ScopeProvider';
+import { Button } from '../../components/Button/Button';
 import { Chip, type Tone } from '../../components/Chip/Chip';
 import { Field, FieldRow, Input, Select } from '../../components/Controls/Controls';
 import { DataTable, type Column } from '../../components/DataTable/DataTable';
@@ -21,6 +27,8 @@ import { Dialog } from '../../components/Dialog/Dialog';
 import { ErrorNote } from '../../components/Feedback/Feedback';
 import { Pagination } from '../../components/Pagination/Pagination';
 import { Toolbar } from '../../components/Panel/Panel';
+import { useToast } from '../../components/Toast/Toast';
+import { errorMessage } from '../../lib/errors';
 import { fmtDate, fmtDateTime } from '../../lib/format';
 import { useUrlState } from '../../lib/useUrlState';
 
@@ -34,6 +42,44 @@ const KIND_TONE: Record<DocumentKind, Tone> = {
   inventory: 'neutral',
 };
 
+const EXPORTABLE: readonly DocumentKind[] = ['receipt', 'writeoff', 'transfer', 'inventory'];
+
+/** Выгрузка документа в учётные системы: менеджер отправляет его вручную или скачивает приход для iiko. */
+function ExportActions({ id, kind }: { id: string; kind: DocumentKind }) {
+  const toast = useToast();
+  const { can } = useAuth();
+  const systems = useGet<ExternalSystemDto[]>('/exchange/systems', undefined, { enabled: can('manager') && EXPORTABLE.includes(kind) });
+  const push = useAction((systemId: string) => post<{ outcome: string; job: { lastError: string | null } | null }>(`/documents/${id}/exchange`, { systemId }), ['/exchange']);
+  if (!can('manager') || !EXPORTABLE.includes(kind)) return null;
+  const active = (systems.data ?? []).filter((s) => s.enabled && s.docKinds.includes(kind as ExchangeDocKind));
+  const outcomeText: Record<string, string> = { done: 'Документ выгружен', blocked: 'Не хватает связей: откройте «Администрирование → Учётные системы → Что связать»', retry: 'Не вышло, попробуем ещё раз', failed: 'Не удалось выгрузить' };
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '0 0 12px' }}>
+      {active.map((s) => (
+        <Button
+          key={s.id}
+          size="sm"
+          icon={<Send size={14} />}
+          loading={push.isPending}
+          onClick={() =>
+            push.mutate(s.id, {
+              onSuccess: (r) => (r.outcome === 'done' ? toast.success(outcomeText.done as string) : toast.error(r.job?.lastError ?? outcomeText[r.outcome] ?? 'Не удалось выгрузить')),
+              onError: (e) => toast.error(errorMessage(e)),
+            })
+          }
+        >
+          Отправить в «{s.name}»
+        </Button>
+      ))}
+      {kind === 'receipt' && (
+        <Button size="sm" icon={<Download size={14} />} onClick={() => void downloadFile(`/documents/${id}/export/iiko.xml`, undefined, 'receipt.xml').catch((e) => toast.error(errorMessage(e)))}>
+          XML для iiko
+        </Button>
+      )}
+    </div>
+  );
+}
+
 function DocumentDialog({ id, onClose }: { id: string | null; onClose: () => void }) {
   const doc = useGet<DocumentDetailDto>(`/documents/${id ?? 'none'}`, undefined, { enabled: Boolean(id) });
   const d = doc.data;
@@ -44,8 +90,8 @@ function DocumentDialog({ id, onClose }: { id: string | null; onClose: () => voi
     { key: 'exp', header: 'Годен до', cell: (m) => <span className="num">{fmtDate(m.expiresOn)}</span> },
     { key: 'qty', header: 'Количество', align: 'right', cell: (m) => formatQty(m.quantity, m.unit) },
     { key: 'cost', header: 'Себест.', align: 'right', cell: (m) => <span className="num">{formatMoney(m.unitCost)}</span> },
-    { key: 'price', header: 'Цена', align: 'right', cell: (m) => (m.unitPrice === null ? <span className="muted">—</span> : <span className="num">{formatMoney(m.unitPrice)}</span>) },
-    { key: 'reason', header: 'Причина', cell: (m) => (m.reason ? WRITEOFF_REASON_LABELS[m.reason] : m.dishName ? `Блюдо: ${m.dishName}` : <span className="muted">—</span>) },
+    { key: 'price', header: 'Цена', align: 'right', cell: (m) => (m.unitPrice === null ? <span className="muted">-</span> : <span className="num">{formatMoney(m.unitPrice)}</span>) },
+    { key: 'reason', header: 'Причина', cell: (m) => (m.reason ? WRITEOFF_REASON_LABELS[m.reason] : m.dishName ? `Блюдо: ${m.dishName}` : <span className="muted">-</span>) },
   ];
   return (
     <Dialog
@@ -56,6 +102,7 @@ function DocumentDialog({ id, onClose }: { id: string | null; onClose: () => voi
       width={960}
     >
       {doc.isError && <ErrorNote error={doc.error} />}
+      {d && id && <ExportActions id={id} kind={d.kind} />}
       {d?.comment && <p style={{ color: 'var(--ink-700)' }}>{d.comment}</p>}
       <div style={{ border: '1px solid var(--line)', borderRadius: 6, overflow: 'hidden' }}>
         <DataTable dense columns={columns} rows={d?.movements} rowKey={(m) => m.id} loading={doc.isLoading} />

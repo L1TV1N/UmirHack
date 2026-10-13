@@ -91,7 +91,7 @@ export const traceabilityRoutes =
       return { items: rows.rows.map((r) => toVsd(r, now)), total: Number(total.rows[0]?.n ?? 0), limit, offset };
     });
 
-    // Погасили в «Меркурии» — отмечаем здесь: система напоминает, но в ГИС сама не ходит
+    // Погасили в «Меркурии» - отмечаем здесь: система напоминает, но в ГИС сама не ходит
     app.post('/traceability/vsd/:id/redeem', { config: asUser('storekeeper'), schema: { params: idParam, body: redeemBody } }, async (req, reply) => {
       const principal = requireUser(req);
       const now = deps.clock();

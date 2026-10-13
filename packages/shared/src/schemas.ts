@@ -286,7 +286,10 @@ export const receiptBody = z.strictObject({
         productId: id,
         quantity,
         unitCost: money,
-        expiresOn: isoDate,
+        /** Срок годности датой. Вместо неё можно передать срок хранения в днях или не передавать ничего: тогда берётся срок из карточки продукта. */
+        expiresOn: isoDate.optional(),
+        /** Срок хранения в днях от дня приёмки. */
+        shelfLifeDays: z.number().int().min(1).max(3650).optional(),
         /** Номер ВСД из «Меркурия» на эту партию. */
         vsd: vsdNumber.optional(),
         /** Коды маркировки, отсканированные при приёмке. */
@@ -295,6 +298,7 @@ export const receiptBody = z.strictObject({
     )
     .min(1)
     .max(200)
+    .refine((lines) => lines.every((l) => !(l.expiresOn && l.shelfLifeDays)), 'Срок годности указывается датой или сроком хранения, но не обоими способами сразу')
     .refine((lines) => lines.reduce((n, l) => n + (l.marks?.length ?? 0), 0) <= MAX_MARKS_PER_DOCUMENT, `Не больше ${MAX_MARKS_PER_DOCUMENT} кодов маркировки в одном приходе`),
 });
 export type ReceiptBody = z.infer<typeof receiptBody>;
@@ -407,6 +411,8 @@ export const settingsBody = z
     digestHour: z.number().int().min(0).max(23),
     /** Рекомендации, стоп-лист и заказы считают скорость с поправкой на день недели, праздники, погоду и акции. */
     useDemandModel: z.boolean().default(true),
+    /** Раз в сутки списывать просроченные партии от имени системы. */
+    autoWriteoffExpired: z.boolean().default(false),
   })
   .refine((v) => v.criticalDays <= v.expiringSoonDays, {
     path: ['criticalDays'],
@@ -526,6 +532,24 @@ export const recommendationsQuery = z.object({
 });
 
 export const forecastQuery = z.object({ locationId: id });
+
+export const supplierRatingQuery = z.object({
+  locationId: id.optional(),
+  /** За сколько последних суток считать. */
+  days: z.coerce.number().int().min(7).max(365).default(90),
+});
+
+export const rescuedQuery = z.object({
+  locationId: id.optional(),
+  /** За сколько последних суток считать. */
+  days: z.coerce.number().int().min(1).max(90).default(30),
+});
+
+export const shortagesQuery = z.object({
+  locationId: id.optional(),
+  /** За сколько последних суток считать. */
+  days: z.coerce.number().int().min(1).max(90).default(30),
+});
 
 export const reportQuery = z.object({
   locationId: id.optional(),

@@ -406,7 +406,7 @@ export async function planImport(db: Reader, bytes: Buffer, createCategories: bo
     }
     if (categoryName && categoryName.toLowerCase() !== (categoryNameById.get(existing.category_id) ?? '').toLowerCase()) {
       patch.categoryName = categoryName;
-      changes.push(`категория: ${categoryNameById.get(existing.category_id) ?? '—'} → ${categoryName}`);
+      changes.push(`категория: ${categoryNameById.get(existing.category_id) ?? '-'} → ${categoryName}`);
     }
     if (price !== undefined && price !== null && roundKopeks(price) !== Number(existing.price)) {
       patch.price = roundKopeks(price);

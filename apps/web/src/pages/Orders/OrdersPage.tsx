@@ -102,7 +102,7 @@ export default function OrdersPage() {
   const [openId, setOpenId] = useState<string | null>(null);
 
   useEffect(() => {
-    document.title = 'Заказы — Запас';
+    document.title = 'Заказы - Запас';
   }, []);
 
   const where = scope.locationId ? { locationId: scope.locationId } : {};
@@ -125,7 +125,7 @@ export default function OrdersPage() {
     { key: 'loc', header: 'Точка', cell: (o) => o.locationName },
     { key: 'lines', header: 'Позиций', align: 'right', cell: (o) => <span className="num">{o.lines}</span> },
     { key: 'total', header: 'Сумма', align: 'right', cell: (o) => <span className="num">{formatMoney(o.total)}</span> },
-    { key: 'expected', header: 'Ждём к', cell: (o) => (o.expectedOn ? fmtDate(o.expectedOn) : <span className="muted">—</span>) },
+    { key: 'expected', header: 'Ждём к', cell: (o) => (o.expectedOn ? fmtDate(o.expectedOn) : <span className="muted">-</span>) },
     { key: 'status', header: 'Статус', cell: (o) => <Chip tone={STATUS_TONE[o.status]}>{ORDER_STATUS_LABELS[o.status]}</Chip> },
   ];
 

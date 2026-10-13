@@ -33,7 +33,7 @@
   inset: 0;
   display: grid;
   place-items: center;
-  color: var(--white);
+  color: var(--fixed-light);
   font-weight: 600;
 }
 
@@ -43,7 +43,7 @@
   border: 1px solid var(--danger-200);
   border-radius: var(--radius);
   background: var(--danger-50);
-  color: #991b1b;
+  color: var(--danger-ink);
   font-weight: 600;
 }
 

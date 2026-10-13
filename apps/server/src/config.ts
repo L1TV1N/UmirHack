@@ -40,6 +40,8 @@ const schema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional(),
   TELEGRAM_COMMANDS: bool.optional(),
+  // SOCKS-прокси для запросов к Telegram, если api.telegram.org недоступен напрямую: socks5://логин:пароль@хост:порт
+  TELEGRAM_PROXY_URL: z.string().optional(),
 
   // Погода для прогноза спроса (Open-Meteo): уходят только координаты точек, у которых они указаны
   WEATHER_ENABLED: bool.default(true),
@@ -51,6 +53,9 @@ const schema = z.object({
   // Вебхуки: куда разрешено слать события. По умолчанию только https и только внешние адреса
   WEBHOOK_ALLOW_PRIVATE: bool.default(false),
   WEBHOOK_ALLOW_HTTP: bool.optional(),
+
+  // Обмен с 1С и iiko: серверы учётных систем чаще всего во внутренней сети. Перечислите их адреса через запятую
+  EXCHANGE_ALLOW_HOSTS: z.string().default(''),
 
   // Распознавание фото накладной через Claude. Без ключа загрузка фото выключена, УПД в XML работает всегда
   ANTHROPIC_API_KEY: z.string().optional(),
@@ -81,9 +86,11 @@ export interface Config {
   /** Через сколько после операции пересчитывать стоп-лист. Частые операции склеиваются в один пересчёт. */
   stopListSyncDelayMs: number;
   /** commands: бот отвечает на команды (опрос Telegram). Выключается, если опрос ведёт другой экземпляр. */
-  telegram: { token: string; chatId: string; commands: boolean } | null;
+  telegram: { token: string; chatId: string; commands: boolean; proxy: string | null } | null;
   invoicePhoto: { apiKey: string; model: string } | null;
   webhooks: { allowPrivate: boolean; allowHttp: boolean };
+  /** Хосты, которым разрешён обмен по http и во внутренней сети. */
+  exchange: { allowHosts: string[] };
   /** Загружать ли погоду из внешнего сервиса. */
   weatherEnabled: boolean;
   /** Почтовый сервер для писем поставщикам. */
@@ -179,10 +186,11 @@ export function parseConfig(source: NodeJS.ProcessEnv = process.env): Config {
     weatherEnabled: e.WEATHER_ENABLED,
     smtp: e.SMTP_URL && e.SMTP_FROM ? { url: e.SMTP_URL, from: e.SMTP_FROM } : null,
     webhooks: { allowPrivate: e.WEBHOOK_ALLOW_PRIVATE, allowHttp: e.WEBHOOK_ALLOW_HTTP ?? !production },
+    exchange: { allowHosts: e.EXCHANGE_ALLOW_HOSTS.split(',').map((h) => h.trim()).filter(Boolean) },
     invoicePhoto: e.ANTHROPIC_API_KEY ? { apiKey: e.ANTHROPIC_API_KEY, model: e.INVOICE_MODEL } : null,
     telegram:
       e.TELEGRAM_BOT_TOKEN && e.TELEGRAM_CHAT_ID
-        ? { token: e.TELEGRAM_BOT_TOKEN, chatId: e.TELEGRAM_CHAT_ID, commands: e.TELEGRAM_COMMANDS ?? e.NODE_ENV !== 'test' }
+        ? { token: e.TELEGRAM_BOT_TOKEN, chatId: e.TELEGRAM_CHAT_ID, commands: e.TELEGRAM_COMMANDS ?? e.NODE_ENV !== 'test', proxy: e.TELEGRAM_PROXY_URL || null }
         : null,
   };
 }

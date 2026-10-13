@@ -25,6 +25,19 @@ export const SUPPLIERS = [
   { name: 'Рыбный двор', phone: '+7 863 266-18-33', inn: completeInn('616606789'), email: null as string | null, leadTimeDays: 2, minOrderSum: 0, autoOrder: false },
 ];
 
+/**
+ * Характер демо-поставщиков, в том же порядке, что и SUPPLIERS: доля строк, которые недовезли, и доля заказов,
+ * которые привезли позже обещанного. Нужен, чтобы в рейтинге были разные оценки.
+ */
+export const SUPPLIER_PROFILES: { shortShare: number; lateShare: number }[] = [
+  { shortShare: 0.05, lateShare: 0.08 },
+  { shortShare: 0.2, lateShare: 0.35 },
+  { shortShare: 0.03, lateShare: 0.05 },
+  { shortShare: 0.45, lateShare: 0.6 },
+  { shortShare: 0.08, lateShare: 0.15 },
+  { shortShare: 0.25, lateShare: 0.3 },
+];
+
 /** Кратность заказа демо-продукта: яйца коробками по 30, штучное по 10, весовое по 5 кг, жидкое ящиком по 6 л. */
 export const packFor = (p: Pick<ProductSpec, 'key' | 'unit'>): number => (p.key.startsWith('egg') ? 30 : p.unit === 'pcs' ? 10 : p.unit === 'kg' ? 5 : 6);
 
@@ -111,6 +124,36 @@ export const DISHES: DishSpec[] = [
   { name: 'Салат «Греческий»', price: 330, perDay: 17, items: [['tomato', 0.1], ['cucumber', 0.1], ['cheese', 0.05], ['oil', 0.02], ['onion', 0.02]] },
   { name: 'Паста с сёмгой в сливках', price: 590, perDay: 12, items: [['pasta', 0.1], ['salmon', 0.12], ['cream', 0.08], ['cheese', 0.02]] },
   { name: 'Сырники со сметаной', price: 260, perDay: 15, items: [['curd', 0.15], ['eggs', 1], ['flour', 0.03], ['sugar', 0.02], ['sour', 0.03]] },
+];
+
+/** Код блюда в кассе, как его вводит кассир: D01, D02 и так далее по порядку блюд. */
+export const dishCode = (index: number): string => `D${String(index + 1).padStart(2, '0')}`;
+
+export interface ShortageSpec {
+  product: string;
+  daysAgo: number;
+  hour: number;
+  /** Сколько часов продукт не давал готовить блюда. */
+  hours: number;
+  /** Сколько заказов гостей отклонили за это время. */
+  refusals: number;
+}
+
+/**
+ * Нехватки на кухне за последний месяц. Нужны, чтобы статистика дефицитных ингредиентов не была пустой в день запуска:
+ * дальше история пополняется сама, по работе системы. К журналу движений эти записи не привязаны.
+ */
+export const SHORTAGE_HISTORY: ShortageSpec[] = [
+  { product: 'cream', daysAgo: 26, hour: 12, hours: 9, refusals: 4 },
+  { product: 'salmon', daysAgo: 23, hour: 18, hours: 14, refusals: 6 },
+  { product: 'eggs', daysAgo: 19, hour: 10, hours: 7, refusals: 9 },
+  { product: 'beef', daysAgo: 16, hour: 14, hours: 20, refusals: 11 },
+  { product: 'greens', daysAgo: 13, hour: 9, hours: 30, refusals: 3 },
+  { product: 'cheese', daysAgo: 11, hour: 11, hours: 8, refusals: 5 },
+  { product: 'cream', daysAgo: 8, hour: 16, hours: 6, refusals: 3 },
+  { product: 'eggs', daysAgo: 6, hour: 12, hours: 5, refusals: 6 },
+  { product: 'beef', daysAgo: 4, hour: 15, hours: 11, refusals: 7 },
+  { product: 'cheese', daysAgo: 2, hour: 17, hours: 4, refusals: 2 },
 ];
 
 /** Сколько продукта в день уходит на розничной точке. Ключи точек см. LOCATIONS. */

@@ -54,7 +54,7 @@ export function ScopeProvider({ children }: { children: ReactNode }) {
   }, [activeId, loaded]);
 
   const setActive = useCallback((id: string) => setStored(id), []);
-  const nameOf = useCallback((id: string) => locations.find((l) => l.id === id)?.name ?? '—', [locations]);
+  const nameOf = useCallback((id: string) => locations.find((l) => l.id === id)?.name ?? '-', [locations]);
 
   const value = useMemo<ScopeValue>(
     () => ({

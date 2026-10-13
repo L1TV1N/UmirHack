@@ -1,0 +1,143 @@
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+
+  > :first-child {
+    flex: 1;
+    min-width: 220px;
+  }
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 12px;
+  padding: 14px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--white);
+  text-align: left;
+  break-inside: avoid;
+
+  &:hover {
+    border-color: var(--brand-400);
+  }
+
+  strong {
+    font-size: 13px;
+    line-height: 1.3;
+  }
+
+  small {
+    color: var(--ink-500);
+    font-size: 12px;
+  }
+}
+
+// Штрихкод всегда чёрный на белом, в любой теме: иначе сканер его не прочитает
+.bars {
+  padding: 8px 10px 4px;
+  border-radius: 4px;
+  background: #fff;
+  color: #000;
+  text-align: center;
+
+  svg {
+    display: block;
+    width: 100%;
+    height: 64px;
+  }
+
+  span {
+    display: block;
+    margin-top: 2px;
+    font: 12px/1.2 ui-monospace, monospace;
+    letter-spacing: 0.1em;
+  }
+}
+
+.copied {
+  color: var(--ok-700);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.group {
+  padding: 14px;
+  border-bottom: 1px solid var(--line-soft);
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  h3 {
+    margin: 0 0 8px;
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ink-500);
+  }
+}
+
+.check {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 10px;
+  align-items: start;
+  padding: 7px 0;
+  font-size: 13.5px;
+  line-height: 1.45;
+
+  small {
+    grid-column: 2;
+    color: var(--ink-500);
+  }
+
+  a {
+    font-weight: 600;
+  }
+}
+
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.progress {
+  height: 6px;
+  margin: 10px 14px 0;
+  border-radius: 3px;
+  background: var(--surface-100);
+  overflow: hidden;
+
+  i {
+    display: block;
+    height: 100%;
+    background: var(--ok-600);
+    transition: width 0.2s;
+  }
+}
+
+@media print {
+  .toolbar,
+  .noPrint {
+    display: none !important;
+  }
+
+  .card {
+    border: 1px solid #999;
+  }
+}

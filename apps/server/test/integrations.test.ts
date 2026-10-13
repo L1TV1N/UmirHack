@@ -1,4 +1,4 @@
-import type { StopListChangedPayload, WebhookCreatedDto, WebhookDeliveryDto } from '@zapas/shared';
+import type { PromotionChangedPayload, StopListChangedPayload, WebhookCreatedDto, WebhookDeliveryDto } from '@zapas/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { signBody } from '../src/lib/crypto';
 import { DISABLE_AFTER_FAILURES, processDeliveries, publishStopList, RETRY_DELAYS_MS } from '../src/modules/integrations/service';
@@ -413,6 +413,69 @@ describe('доставка и повторы', () => {
     await schedulerTick(env.deps);
     const rows = await deliveries(hook.id);
     expect(rows.map((r) => r.status)).toEqual(['pending']);
+  });
+});
+
+describe('уценка в кассу', () => {
+  async function key(locationId: string) {
+    const res = await admin()('POST', '/api/api-keys', { name: 'Касса', locationId });
+    return res.json().key as string;
+  }
+  const productsFeed = async (k: string) => (await env.app.inject({ method: 'GET', url: '/api/pos/products', headers: { 'x-api-key': k } })).json().items as { name: string; price: number; markdown: { percent: number; price: number; endsOn: string; quantity: number } | null }[];
+
+  it('лента показывает скидку на ближайшую партию и перестаёт, когда её отменили', async () => {
+    const milk = await addProduct(env, w.categoryId, { name: 'Молоко', unit: 'l', price: 100, cost: 60 });
+    await receive(env, w.manager.token, w.locA.id, [
+      { productId: milk, quantity: 10, expiresOn: w.day(2) },
+      { productId: milk, quantity: 30, expiresOn: w.day(9) },
+    ]);
+    const k = await key(w.locA.id);
+    expect((await productsFeed(k))[0]?.markdown).toBeNull();
+
+    const batch = (await env.owner.selectFrom('batches').select('id').where('expires_on', '=', w.day(2)).executeTakeFirstOrThrow()).id;
+    const created = await manager()('POST', '/api/promotions', { batchId: batch, percent: 30 });
+    expect(created.statusCode).toBe(201);
+    const item = (await productsFeed(k))[0];
+    expect(item).toMatchObject({ name: 'Молоко', price: 100 });
+    expect(item?.markdown).toEqual({ percent: 30, price: 70, endsOn: w.day(2), quantity: 10 });
+    // на другой точке этого товара нет и скидки нет
+    expect((await productsFeed(await key(w.locB.id)))[0]?.markdown).toBeNull();
+
+    expect((await manager()('DELETE', `/api/promotions/${created.json().id}`)).statusCode).toBe(204);
+    expect((await productsFeed(k))[0]?.markdown).toBeNull();
+  });
+
+  it('скидка на более позднюю партию кассе не показывается, пока не разойдётся ближайшая', async () => {
+    const milk = await addProduct(env, w.categoryId, { name: 'Молоко', unit: 'l', price: 100, cost: 60 });
+    await receive(env, w.manager.token, w.locA.id, [
+      { productId: milk, quantity: 10, expiresOn: w.day(2) },
+      { productId: milk, quantity: 30, expiresOn: w.day(9) },
+    ]);
+    const later = (await env.owner.selectFrom('batches').select('id').where('expires_on', '=', w.day(9)).executeTakeFirstOrThrow()).id;
+    expect((await manager()('POST', '/api/promotions', { batchId: later, percent: 15 })).statusCode).toBe(201);
+    expect((await productsFeed(await key(w.locA.id)))[0]?.markdown).toBeNull();
+  });
+
+  it('подписанный адрес получает событие о скидке и об её отмене', async () => {
+    const hook = await createHook({ events: ['promotion.changed'] });
+    const milk = await addProduct(env, w.categoryId, { name: 'Молоко', unit: 'l', price: 100, cost: 60 });
+    await receive(env, w.manager.token, w.locA.id, [{ productId: milk, quantity: 10, expiresOn: w.day(2) }]);
+    const batch = (await env.owner.selectFrom('batches').select('id').executeTakeFirstOrThrow()).id;
+
+    const created = await manager()('POST', '/api/promotions', { batchId: batch, percent: 30 });
+    env.clock.advance(1000);
+    await manager()('DELETE', `/api/promotions/${created.json().id}`);
+    expect(await processDeliveries(env.deps)).toBe(2);
+
+    // доставки уходят параллельно, порядок между ними не гарантирован
+    const sent = env.webhooks.requests.map((r) => JSON.parse(r.body) as PromotionChangedPayload);
+    const on = sent.find((p) => p.markdown !== null);
+    const off = sent.find((p) => p.markdown === null);
+    expect(env.webhooks.requests.every((r) => r.headers['x-zapas-event'] === 'promotion.changed')).toBe(true);
+    expect(on).toMatchObject({ event: 'promotion.changed', locationId: w.locA.id, product: { name: 'Молоко', price: 100 } });
+    expect(on?.markdown).toEqual({ percent: 30, price: 70, endsOn: w.day(2), quantity: 10 });
+    expect(off?.markdown).toBeNull();
+    expect((await deliveries(hook.id)).every((d) => d.status === 'delivered')).toBe(true);
   });
 });
 

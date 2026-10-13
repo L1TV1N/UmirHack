@@ -15,7 +15,9 @@ import { useScope } from '../../auth/ScopeProvider';
 import { Button } from '../../components/Button/Button';
 import { EmptyState, ErrorNote, Loading } from '../../components/Feedback/Feedback';
 import { PageHeader, Panel, Toolbar } from '../../components/Panel/Panel';
+import { Method, MethodItem } from '../../components/Method/Method';
 import { RecoItem } from '../../components/Recommendation/RecoItem';
+import { AccuracyPanel } from './AccuracyPanel';
 import { Segmented } from '../../components/Tabs/Tabs';
 import { useConfirm } from '../../components/Toast/Confirm';
 import { useToast } from '../../components/Toast/Toast';
@@ -37,7 +39,7 @@ export default function RecommendationsPage() {
   }, { placeholderData: keepPreviousData });;
 
   useEffect(() => {
-    document.title = 'Рекомендации — Запас';
+    document.title = 'Рекомендации - Запас';
   }, []);
 
   const run = useAction(async (rec: RecommendationDto): Promise<string> => {
@@ -88,7 +90,7 @@ export default function RecommendationsPage() {
   };
 
   const copyOrder = async (list: RecommendationDto[]) => {
-    const text = list.map((r) => `${r.productName} (${r.locationName}) — ${formatQty(r.quantity, r.unit)}`).join('\n');
+    const text = list.map((r) => `${r.productName} (${r.locationName}) - ${formatQty(r.quantity, r.unit)}`).join('\n');
     try {
       await navigator.clipboard.writeText(text);
       toast.success('Список заказа скопирован');
@@ -143,20 +145,18 @@ export default function RecommendationsPage() {
     <>
       <PageHeader title="Рекомендации" subtitle="Что сделать, чтобы продукты не пропали: списать, уценить, переместить, продвинуть через блюда или заказать." />
 
-      <div className={styles.how}>
-        <div>
-          <strong>Прогноз продаж</strong>
-          Скорость расхода считается за последние 4 недели, последняя неделя весит больше.
-        </div>
-        <div>
-          <strong>Сроки по партиям</strong>
-          Партии расходуются от ближайшего срока, поэтому поздняя партия ждёт, пока уйдёт ранняя.
-        </div>
-        <div>
-          <strong>Скидка не в убыток</strong>
-          Цена со скидкой не опускается ниже себестоимости, кроме последних суток.
-        </div>
-      </div>
+      <Method>
+        <MethodItem title={<>Прогноз продаж</>}>Скорость расхода считается за последние 4 недели, последняя неделя весит больше, с поправкой на день недели, праздники, погоду и акции.</MethodItem>
+        <MethodItem title={<>Сроки по партиям</>}>Партии расходуются от ближайшего срока, поэтому поздняя партия ждёт, пока уйдёт ранняя.</MethodItem>
+        <MethodItem title={<>Скидка не в убыток</>}>Цена со скидкой не опускается ниже себестоимости, кроме последних суток.</MethodItem>
+      </Method>
+
+      {can('manager') && (
+        <>
+          <AccuracyPanel locationId={scope.locationId} />
+          <div style={{ height: 16 }} />
+        </>
+      )}
 
       <Panel>
         <Toolbar>

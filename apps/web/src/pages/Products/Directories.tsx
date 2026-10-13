@@ -149,9 +149,9 @@ export function SuppliersPanel() {
 
   const columns: Column<SupplierDto>[] = [
     { key: 'name', header: 'Поставщик', cell: (s) => <strong>{s.name}</strong> },
-    { key: 'inn', header: 'ИНН', cell: (s) => (s.inn ? <span className="num">{s.inn}</span> : <span className="muted">—</span>) },
-    { key: 'phone', header: 'Телефон', cell: (s) => s.phone ?? <span className="muted">—</span> },
-    { key: 'email', header: 'Почта для заказов', cell: (s) => s.email ?? <span className="muted">—</span> },
+    { key: 'inn', header: 'ИНН', cell: (s) => (s.inn ? <span className="num">{s.inn}</span> : <span className="muted">-</span>) },
+    { key: 'phone', header: 'Телефон', cell: (s) => s.phone ?? <span className="muted">-</span> },
+    { key: 'email', header: 'Почта для заказов', cell: (s) => s.email ?? <span className="muted">-</span> },
     { key: 'lead', header: 'Привозит за', align: 'right', cell: (s) => <span className="num">{s.leadTimeDays === 0 ? 'в тот же день' : daysWord(s.leadTimeDays)}</span> },
     { key: 'status', header: 'Статус', cell: (s) => <Chip tone={s.isActive ? 'ok' : 'neutral'}>{s.isActive ? 'Работаем' : 'Отключён'}</Chip> },
     { key: 'edit', header: '', align: 'right', cell: (s) => can('manager') && <Button size="sm" onClick={() => open(s)}>Изменить</Button> },

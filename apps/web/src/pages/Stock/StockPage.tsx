@@ -40,7 +40,7 @@ export default function StockPage() {
   const offset = Number(url.offset) || 0;
 
   useEffect(() => {
-    document.title = 'Остатки — Запас';
+    document.title = 'Остатки - Запас';
   }, []);
   useEffect(() => {
     if (debounced !== url.q) setUrl({ q: debounced });
@@ -91,7 +91,7 @@ export default function StockPage() {
       key: 'min',
       header: 'Минимум',
       align: 'right',
-      cell: (r) => (r.minStock > 0 ? <span className={r.belowMin ? styles.bad : 'muted'}>{formatQty(r.minStock, r.unit)}</span> : <span className="muted">—</span>),
+      cell: (r) => (r.minStock > 0 ? <span className={r.belowMin ? styles.bad : 'muted'}>{formatQty(r.minStock, r.unit)}</span> : <span className="muted">-</span>),
     },
     {
       key: 'next',
@@ -103,7 +103,7 @@ export default function StockPage() {
             <span className={styles.sub}>{describeDaysLeft(r.daysLeft)}</span>
           </>
         ) : (
-          <span className="muted">—</span>
+          <span className="muted">-</span>
         ),
     },
     {

@@ -6,7 +6,8 @@ import { writeAudit } from '../../modules/audit/audit';
 import { DEFAULT_SETTINGS } from '../../modules/settings/settings';
 import { createDb } from '../client';
 import { demoWeatherRange, DEMO_COORDINATES } from './weather';
-import { DISHES, isMarked, kitchenDemandPerDay, LOCATIONS, packFor, PRODUCTS, RETAIL_DEMAND, SUPPLIERS, USERS, VSD_CATEGORIES } from './data';
+import { dishCode, DISHES, isMarked, kitchenDemandPerDay, LOCATIONS, packFor, PRODUCTS, RETAIL_DEMAND, SUPPLIERS, USERS, VSD_CATEGORIES } from './data';
+import { seedHaccp } from './haccp';
 import { seedTraceability } from './traceability';
 import { simulate } from './simulate';
 
@@ -150,10 +151,10 @@ export async function seed(config: Config, options: { reset: boolean; log: (m: s
           .executeTakeFirstOrThrow();
         ids.products[p.key] = row.id;
       }
-      for (const d of DISHES) {
+      for (const [i, d] of DISHES.entries()) {
         const row = await trx
           .insertInto('dishes')
-          .values({ name: d.name, price: d.price, created_at: now, updated_at: now })
+          .values({ name: d.name, price: d.price, code: dishCode(i), created_at: now, updated_at: now })
           .returning('id')
           .executeTakeFirstOrThrow();
         ids.dishes[d.name] = row.id;
@@ -178,6 +179,34 @@ export async function seed(config: Config, options: { reset: boolean; log: (m: s
     const sim = simulate({ today, days: HISTORY_DAYS, ids, nowHour: hourIn(config.businessTz, now) });
 
     await db.transaction().execute(async (trx) => {
+      await insertChunks(sim.orders, (chunk) =>
+        trx
+          .insertInto('purchase_orders')
+          .values(
+            chunk.map((o) => ({
+              id: o.id,
+              number: o.number,
+              supplier_id: o.supplierId,
+              location_id: o.locationId,
+              status: 'received' as const,
+              expected_on: o.expectedOn,
+              comment: null,
+              total: o.total,
+              created_by: null,
+              created_at: o.sentAt,
+              updated_at: o.closedAt,
+              sent_at: o.sentAt,
+              sent_by: null,
+              closed_at: o.closedAt,
+            })),
+          )
+          .execute(),
+      );
+      await insertChunks(
+        sim.orders.flatMap((o) => o.lines.map((l) => ({ order_id: o.id, product_id: l.productId, quantity: l.quantity, unit_cost: l.unitCost, received_qty: l.received }))),
+        (chunk) => trx.insertInto('purchase_order_lines').values(chunk).execute(),
+      );
+      await sql`SELECT setval('purchase_order_seq', ${Math.max(sim.orders.length, 1)})`.execute(trx);
       await insertChunks(sim.documents, (chunk) =>
         trx
           .insertInto('documents')
@@ -193,6 +222,7 @@ export async function seed(config: Config, options: { reset: boolean; log: (m: s
               comment: d.comment,
               idempotency_scope: null,
               idempotency_key: null,
+              order_id: d.orderId ?? null,
               created_at: d.createdAt,
             })),
           )
@@ -243,6 +273,24 @@ export async function seed(config: Config, options: { reset: boolean; log: (m: s
           )
           .execute(),
       );
+      await insertChunks(sim.promotions, (chunk) =>
+        trx
+          .insertInto('promotions')
+          .values(chunk.map((p) => ({ batch_id: p.batchId, percent: p.percent, ends_on: p.endsOn, created_by: null, created_at: p.createdAt, cancelled_at: p.cancelledAt })))
+          .execute(),
+      );
+      await insertChunks(sim.shortages, (chunk) =>
+        trx
+          .insertInto('shortage_episodes')
+          .values(chunk.map((s) => ({ location_id: s.locationId, product_id: s.productId, started_at: s.startedAt, ended_at: s.endedAt, dishes_blocked: s.dishesBlocked })))
+          .execute(),
+      );
+      await insertChunks(sim.refusals, (chunk) =>
+        trx
+          .insertInto('sale_refusals')
+          .values(chunk.map((r) => ({ location_id: r.locationId, created_at: r.createdAt, order_total: r.total, missing: r.missing, source: 'pos' as const })))
+          .execute(),
+      );
       await sql`SELECT setval('document_number_seq', ${sim.lastNumber})`.execute(trx);
 
       const broken = await sql<{ n: number }>`
@@ -255,6 +303,7 @@ export async function seed(config: Config, options: { reset: boolean; log: (m: s
       if (Number(broken.rows[0]?.n) > 0) throw new Error('Остатки партий не сходятся с журналом движений');
 
       await seedTraceability(trx, now, today);
+      await seedHaccp(trx, ids.locations, now, today);
 
       await writeAudit(trx, {
         action: 'seed.run',

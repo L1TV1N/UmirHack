@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { HelpButton } from '../Help/HelpButton';
 import styles from './Panel.module.scss';
 
 export function Panel({
@@ -40,7 +41,10 @@ export function PageHeader({ title, subtitle, actions }: { title: string; subtit
   return (
     <header className={styles.page}>
       <div>
-        <h1>{title}</h1>
+        <div className={styles.titleRow}>
+          <h1>{title}</h1>
+          <HelpButton />
+        </div>
         {subtitle && <p>{subtitle}</p>}
       </div>
       {actions && <div className={styles.actions}>{actions}</div>}

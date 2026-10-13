@@ -18,8 +18,11 @@ import { encryptSecret, randomToken } from '../../lib/crypto';
 import { conflict, forbidden, notFound, PG_FK_VIOLATION, badRequest, pgCode } from '../../lib/errors';
 import { asPos, asUser, requirePrincipal, requireUser } from '../../plugins/access';
 import { writeAudit } from '../audit/audit';
+import { businessToday } from '../../lib/time';
+import { nextMarkdowns } from '../promotions/markdown';
 import { getStopList } from '../stoplist/service';
 import { assertWebhookUrl } from './guard';
+import { iikoStopList } from '../exchange/iiko';
 import { enqueueFullState, publishStopList, sendPing, toDeliveryDto, toFeedEntries, toWebhookDto } from './service';
 
 const newSecret = () => `whsec_${randomToken(32)}`;
@@ -199,13 +202,21 @@ export const integrationRoutes =
       return { generatedAt: deps.clock().toISOString(), locationId, entries: await toFeedEntries(deps, list.entries) };
     });
 
+    /** То же самое в виде ответа iikoCloud: для систем, которые уже умеют читать стоп-лист iiko. */
+    app.get('/pos/stop-list/iiko', { config: asPos }, async (req) => {
+      const locationId = posLocation(req);
+      const list = await getStopList(deps, [locationId]);
+      return iikoStopList(deps.clock().toISOString(), locationId, await toFeedEntries(deps, list.entries));
+    });
+
     app.get('/pos/products', { config: asPos, schema: { querystring: posProductsQuery } }, async (req): Promise<Page<PosProductDto>> => {
-      posLocation(req);
+      const locationId = posLocation(req);
       const { limit, offset } = req.query;
       const total = await db.selectFrom('products').select((eb) => eb.fn.countAll<string>().as('n')).executeTakeFirstOrThrow();
-      const rows = await db.selectFrom('products').select(['sku', 'barcode', 'name', 'unit', 'price', 'sellable', 'is_active']).orderBy('sku').limit(limit).offset(offset).execute();
+      const rows = await db.selectFrom('products').select(['id', 'sku', 'barcode', 'name', 'unit', 'price', 'sellable', 'is_active']).orderBy('sku').limit(limit).offset(offset).execute();
+      const markdowns = await nextMarkdowns(db, locationId, businessToday(deps), rows.map((r) => r.id));
       return {
-        items: rows.map((r) => ({ sku: r.sku, barcode: r.barcode, name: r.name, unit: r.unit, price: Number(r.price), sellable: r.sellable, isActive: r.is_active })),
+        items: rows.map((r) => ({ sku: r.sku, barcode: r.barcode, name: r.name, unit: r.unit, price: Number(r.price), markdown: markdowns.get(r.id) ?? null, sellable: r.sellable, isActive: r.is_active })),
         total: Number(total.n),
         limit,
         offset,

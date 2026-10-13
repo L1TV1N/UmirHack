@@ -152,12 +152,12 @@ export default function DishesPage() {
   const [editing, setEditing] = useState<DishDto | 'new' | null>(null);
 
   useEffect(() => {
-    document.title = 'Блюда — Запас';
+    document.title = 'Блюда - Запас';
   }, []);
 
   const columns: Column<DishDto>[] = [
     { key: 'name', header: 'Блюдо', cell: (d) => <strong>{d.name}</strong> },
-    { key: 'code', header: 'Код в кассе', cell: (d) => (d.code ? <span className="mono">{d.code}</span> : <span className="muted">—</span>) },
+    { key: 'code', header: 'Код в кассе', cell: (d) => (d.code ? <span className="mono">{d.code}</span> : <span className="muted">-</span>) },
     { key: 'price', header: 'Цена', align: 'right', cell: (d) => <span className="num">{formatMoney(d.price)}</span> },
     {
       key: 'items',

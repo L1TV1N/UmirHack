@@ -1,4 +1,4 @@
-import { formatQty, UNIT_LABELS, type DishDto, type ProductDto } from '@zapas/shared';
+import { formatQty, UNIT_LABELS, type DishDto, type ProductDto, type StopListDto } from '@zapas/shared';
 import { useState, type FormEvent } from 'react';
 import { submitDocument } from '../../api/documents';
 import { STOCK_PREFIXES, useAction, useGet } from '../../api/hooks';
@@ -25,13 +25,15 @@ interface Line {
 }
 
 const TEMPLATE = '120px minmax(220px, 2.4fr) 130px 36px';
-const LABELS = ['Что продаём', 'Позиция', 'Количество', ''];
+const LABELS = ['Что заказано', 'Позиция', 'Количество', ''];
 
 export function SaleForm() {
   const toast = useToast();
   const { user } = useAuth();
   const [locationId, setLocation, locations] = useOperationLocation();
   const dishes = useGet<DishDto[]>('/dishes', undefined, { staleTime: 60_000 });
+  const stopList = useGet<StopListDto>('/stop-list', { locationId }, { enabled: Boolean(locationId), refetchInterval: 30_000 });
+  const stoppedDishes = new Set(stopList.data?.entries.filter((e) => e.entityType === 'dish' && e.locationId === locationId).map((e) => e.entityId));
   const [comment, setComment] = useState('');
   const [errors, setErrors] = useState<Record<number, string>>({});
   const [locationError, setLocationError] = useState<string | undefined>();
@@ -40,7 +42,7 @@ export function SaleForm() {
   const { lines, add, remove, update, reset, upsert } = useLines<Line>(() => ({ kind: 'product', product: null, dishId: '', quantity: '' }));
   const create = useAction(
     (body: object) =>
-      submitDocument<{ number: string }>(user?.id ?? '', { path: '/documents/sales', body, key: key(), label: `Продажа, ${(body as { lines: unknown[] }).lines.length} поз.` }),
+      submitDocument<{ number: string }>(user?.id ?? '', { path: '/documents/sales', body, key: key(), label: `Заказ, ${(body as { lines: unknown[] }).lines.length} поз.` }),
     STOCK_PREFIXES,
   );
 
@@ -71,7 +73,7 @@ export function SaleForm() {
       return l.kind === 'dish' ? { dishId: l.dishId, quantity } : { productId: l.product?.id, quantity };
     });
     setErrors(found);
-    setLocationError(locationId ? undefined : 'Выберите точку, на которой проходит продажа');
+    setLocationError(locationId ? undefined : 'Выберите точку, на которой принимается заказ');
     if (Object.keys(found).length > 0 || !locationId) {
       focusFirstInvalid(form);
       return;
@@ -81,8 +83,8 @@ export function SaleForm() {
       { locationId, ...(comment.trim() ? { comment: comment.trim() } : {}), lines: payload },
       {
         onSuccess: (r) => {
-          if (r.queued) toast.info('Нет связи: продажа сохранена в очереди и уйдёт сама, когда связь вернётся');
-          else toast.success(`Продажа ${r.result.number} проведена, остатки списаны`);
+          if (r.queued) toast.info('Нет связи: заказ сохранён в очереди и уйдёт сам, когда связь вернётся');
+          else toast.success(`Заказ ${r.result.number} принят, продукты списаны`);
           reset();
           setComment('');
           renewKey();
@@ -95,7 +97,7 @@ export function SaleForm() {
   return (
     <form className={styles.form} onSubmit={submit} noValidate>
       <div className={styles.info}>
-        Продажа списывает остатки по принципу «первым уходит то, что раньше испортится». Просроченное не продаётся. Для блюда ингредиенты списываются по рецептуре. Обычно это делает касса через API, форма нужна для ручных продаж.
+        Заказ гостя проверяет, хватает ли ингредиентов, и списывает их по рецептуре, начиная с партий, что раньше испортятся. Если чего-то не хватает, заказ отклоняется целиком и показывается, чего именно. Блюда из стоп-листа выбрать нельзя. Просроченное не продаётся. Обычно заказы приходят из кассы через API, форма нужна для ручного ввода и отдельных товаров.
       </div>
       <div className={styles.top}>
         <LocationField value={locationId} onChange={(id) => { setLocation(id); setLocationError(undefined); }} options={locations} error={locationError} />
@@ -113,7 +115,7 @@ export function SaleForm() {
             onRemove={() => remove(l.key)}
             error={errors[l.key]}
             cells={[
-              <Select key="k" aria-label="Что продаём" value={l.kind} onChange={(e) => update(l.key, { kind: e.target.value as Line['kind'], product: null, dishId: '' })}>
+              <Select key="k" aria-label="Что заказано" value={l.kind} onChange={(e) => update(l.key, { kind: e.target.value as Line['kind'], product: null, dishId: '' })}>
                 <option value="product">Товар</option>
                 <option value="dish">Блюдо</option>
               </Select>,
@@ -123,8 +125,9 @@ export function SaleForm() {
                 <Select key="d" aria-label="Блюдо" value={l.dishId} onChange={(e) => update(l.key, { dishId: e.target.value })}>
                   <option value="">Выберите блюдо</option>
                   {activeDishes.map((d) => (
-                    <option key={d.id} value={d.id}>
+                    <option key={d.id} value={d.id} disabled={stoppedDishes.has(d.id)}>
                       {d.name}
+                      {stoppedDishes.has(d.id) ? ' - в стоп-листе' : ''}
                     </option>
                   ))}
                 </Select>
@@ -137,7 +140,7 @@ export function SaleForm() {
           />
         ))}
         <LinesFooter onAdd={add}>
-          <ScanButton onProduct={onScan} title="Сканирование продажи" hint="Каждый скан добавляет единицу товара в продажу" />
+          <ScanButton onProduct={onScan} title="Сканирование заказа" hint="Каждый скан добавляет единицу товара в заказ" />
         </LinesFooter>
       </Lines.Wrap>
 
@@ -145,7 +148,7 @@ export function SaleForm() {
       <div className={styles.foot}>
         <span />
         <Button variant="primary" type="submit" loading={create.isPending}>
-          Провести продажу
+          Принять заказ
         </Button>
       </div>
     </form>

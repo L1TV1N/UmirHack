@@ -1,0 +1,94 @@
+
+
+.sub {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-500);
+}
+
+.empty {
+  padding: 18px;
+  color: var(--ink-500);
+}
+
+.bars {
+  list-style: none;
+  margin: 0;
+  padding: 8px 18px 4px;
+
+  li {
+    display: grid;
+    grid-template-columns: 120px minmax(0, 1fr) 110px;
+    align-items: center;
+    gap: 12px;
+    padding: 5px 0;
+
+    @media (max-width: 520px) {
+      grid-template-columns: 90px minmax(0, 1fr) 90px;
+    }
+  }
+}
+
+.barLabel {
+  font-size: 13px;
+  color: var(--ink-700);
+}
+
+.track {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--surface-100);
+  overflow: hidden;
+
+  i {
+    display: block;
+    height: 100%;
+    border-radius: 4px;
+    background: var(--warn-600);
+  }
+}
+
+.barValue {
+  text-align: right;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+
+  small {
+    margin-left: 6px;
+    font-weight: 500;
+    color: var(--ink-500);
+  }
+}
+
+.matrix {
+  margin-top: 8px;
+  padding: 0 0 4px;
+  overflow-x: auto;
+  border-top: 1px solid var(--line-soft);
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  th,
+  td {
+    padding: 9px 18px;
+    text-align: right;
+    border-bottom: 1px solid var(--line-soft);
+    white-space: nowrap;
+  }
+
+  th:first-child {
+    text-align: left;
+    font-weight: 700;
+  }
+
+  thead th {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--ink-500);
+  }
+}

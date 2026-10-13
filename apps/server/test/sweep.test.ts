@@ -21,6 +21,8 @@ afterAll(() => env.close());
 
 const concrete = (url: string, value = UUID) => url.replace(/:[A-Za-z]+/g, value);
 const routes = (): RouteInfo[] => env.app.routeTable;
+/** Поток событий не завершается сам, через inject его не обойти: он проверяется отдельно в events.test.ts. */
+const isStream = (r: RouteInfo): boolean => r.method === 'GET' && r.url === '/api/events';
 const tokens = (): Record<Role, string> => ({ viewer: w.viewerA.token, storekeeper: w.keeperA.token, manager: w.manager.token, admin: w.admin.token });
 const send = (token: string | null, r: RouteInfo, url = concrete(r.url), payload?: string) =>
   env.app.inject({
@@ -50,6 +52,7 @@ describe('права на всех маршрутах', () => {
 
       const anon = await send(null, r);
       if (anon.statusCode !== 401) bad.push(`${label}: аноним ${anon.statusCode}`);
+      if (isStream(r)) continue;
 
       for (const [role, token] of Object.entries(tokens()) as [Role, string][]) {
         const res = await send(token, r);
@@ -111,7 +114,7 @@ describe('устойчивость к мусорным данным', () => {
     const query = '?limit=-1&offset=abc&q=%00&locationId=%00&status=%27%3B--&from=9999-99-99&to=x&type=%00&flag[]=x&__proto__=1&documentId=zz&productId=%00&active=maybe';
     const problems: string[] = [];
     for (const r of routes()) {
-      if (r.access.kind !== 'user') continue;
+      if (r.access.kind !== 'user' || isStream(r)) continue;
       for (const value of pathValues) {
         const res = await send(w.admin.token, r, concrete(r.url, value));
         if (res.statusCode >= 500) problems.push(`${r.method} ${r.url} путь «${value.slice(0, 20)}» → ${res.statusCode}`);

@@ -40,7 +40,7 @@ export async function seedTraceability(trx: Transaction<Database>, now: Date, to
     .map((b) => {
       const due = new Date(b.created_at.getTime() + VSD_REDEEM_HOURS * 3_600_000);
       const redeemed =
-        b.received_on === today ? false : b.received_on === addDays(today, -1) ? unit(`vsd:${b.id}`) < 0.55 : unit(`vsd:${b.id}`) < 0.95;
+        b.received_on === today ? false : b.received_on === addDays(today, -1) ? unit(`vsd:${b.id}`) < 0.85 : unit(`vsd:${b.id}`) < 0.95;
       const at = new Date(b.created_at.getTime() + (1 + unit(`at:${b.id}`) * 9) * 3_600_000);
       return {
         number: vsdNumber(b.id),

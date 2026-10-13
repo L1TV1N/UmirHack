@@ -44,6 +44,7 @@ export async function addProduct(
     minStock: number;
     sellable: boolean;
     isActive: boolean;
+    shelfLifeDays: number;
   }> = {},
 ): Promise<string> {
   skuSeq += 1;
@@ -56,7 +57,7 @@ export async function addProduct(
       category_id: categoryId,
       unit: over.unit ?? 'kg',
       min_stock: over.minStock ?? 0,
-      shelf_life_days: null,
+      shelf_life_days: over.shelfLifeDays ?? null,
       price: over.price ?? 100,
       cost: over.cost ?? 60,
       sellable: over.sellable ?? true,

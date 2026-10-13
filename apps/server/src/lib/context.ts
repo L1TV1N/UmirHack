@@ -4,6 +4,7 @@ import type { Db } from '../db/client';
 import type { Notifier } from '../modules/notifications/notifier';
 import type { InvoiceReader } from '../modules/invoices/reader';
 import type { WebhookSender } from '../modules/integrations/sender';
+import type { ExchangeTransport } from '../modules/exchange/transport';
 import type { WeatherProvider } from '../modules/forecast/weather';
 import type { Mailer } from '../modules/orders/mailer';
 import type { TelegramApi } from '../modules/telegram/api';
@@ -27,6 +28,8 @@ export interface Deps {
   invoiceReader?: InvoiceReader | null;
   /** Отправка вебхуков. Нет: события копятся в очереди, но не уходят. */
   webhookSender?: WebhookSender | null;
+  /** Обмен с учётными системами (1С, iiko). Нет: задания копятся в очереди, но не уходят. */
+  exchangeTransport?: ExchangeTransport | null;
   /** Письма поставщикам с заказами (нужен SMTP). Нет: заказ отправляется без письма, причина видна в заказе. */
   mailer?: Mailer | null;
   /** Прогноз и история погоды для точек с координатами. Нет: погода в прогнозе не используется. */
@@ -48,6 +51,12 @@ export type Principal =
       id: string;
       name: string;
       locationIds: string[];
+    }
+  /** Фоновые задачи приложения: например, автоматическое списание просроченного. */
+  | {
+      kind: 'system';
+      name: string;
+      locationIds: 'all';
     };
 
 export interface RequestMeta {
@@ -62,7 +71,8 @@ export interface Actor {
 }
 
 export function actorName(p: Principal): string {
-  return p.kind === 'user' ? p.fullName : `Касса «${p.name}»`;
+  if (p.kind === 'user') return p.fullName;
+  return p.kind === 'system' ? p.name : `Касса «${p.name}»`;
 }
 
 export function actorUserId(p: Principal): string | null {

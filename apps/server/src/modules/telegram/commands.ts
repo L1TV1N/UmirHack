@@ -1,8 +1,10 @@
 import {
+  daysWord,
   describeDaysLeft,
   formatMoneyWhole,
   formatQty,
   hasForbiddenChars,
+  hasRole,
   plural,
   ROLE_LABELS,
   type Role,
@@ -10,18 +12,48 @@ import {
 } from '@zapas/shared';
 import type { Deps, Principal } from '../../lib/context';
 import { locationFilter } from '../../lib/scope';
-import { getRecommendations } from '../analytics/service';
+import { getHotDishes, getRecommendations } from '../analytics/service';
 import { buildDigest } from '../notifications/digest';
 import { escapeHtml } from '../notifications/notifier';
 import { stockSummary } from '../stock/queries';
-import { getStopList } from '../stoplist/service';
+import { getStopForecast, getStopList } from '../stoplist/service';
 import type { UserRow } from '../users/users';
+import { encodeAction } from './actions';
+import type { Buttons } from './api';
+import { subscriptionsView, topicsOf } from './subscriptions';
 
 export interface CommandContext {
   deps: Deps;
   principal: Extract<Principal, { kind: 'user' }>;
   user: UserRow;
 }
+
+/** Ответ бота: текст и, если нужно, кнопки под ним. */
+export interface Reply {
+  text: string;
+  buttons?: Buttons;
+}
+
+/** Главное меню под приветствием и сводкой. Каждая кнопка запускает команду без параметров. */
+export const MAIN_MENU: Buttons = [
+  [
+    { text: 'Сводка', data: 'cmd:today' },
+    { text: 'Требует действий', data: 'cmd:risks' },
+  ],
+  [
+    { text: 'Стоп-лист', data: 'cmd:stoplist' },
+    { text: 'Горячие блюда', data: 'cmd:hot' },
+  ],
+  [
+    { text: 'Что заказать', data: 'cmd:order' },
+    { text: 'Уведомления', data: 'cmd:subscribe' },
+  ],
+];
+
+/** Команды, которые можно запустить кнопкой. */
+export const BUTTON_COMMANDS = new Set(['today', 'risks', 'order', 'stoplist', 'hot', 'subscribe']);
+
+const cut = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 
 export interface ParsedCommand {
   name: string;
@@ -56,20 +88,24 @@ export function fit(lines: string[], limit = MESSAGE_LIMIT): string {
 }
 
 const e = escapeHtml;
+/** «Через 5 ч» или «через 2 дня». */
+const eta = (hours: number) => (hours < 1 ? 'меньше чем через час' : hours < 24 ? `через ${hours} ч` : `через ${daysWord(Math.round(hours / 24))}`);
 const more = (shown: number, total: number) => (total > shown ? [`и ещё ${total - shown}`] : []);
 
 export const HELP_TEXT = [
   '<b>Запас: команды</b>',
-  '/today — сводка по вашим точкам',
-  '/risks — что требует действий: списать, уценить, переместить',
-  '/order — что заказать',
-  '/stoplist — стоп-лист',
-  '/stock молоко — остатки продукта по точкам',
-  '/expiring — что скоро истекает',
-  '/expired — просрочено, ждёт списания',
-  '/low — ниже минимального остатка',
-  '/points — ваши точки',
-  '/unlink — отвязать этот чат',
+  '/today - сводка по вашим точкам',
+  '/risks - что требует действий: списать, уценить, переместить',
+  '/order - что заказать',
+  '/stoplist - стоп-лист и прогноз, когда блюда закончатся',
+  '/hot - горячие предложения: какие блюда продвигать',
+  '/subscribe - на какие уведомления вы подписаны',
+  '/stock молоко - остатки продукта по точкам',
+  '/expiring - что скоро истекает',
+  '/expired - просрочено, ждёт списания',
+  '/low - ниже минимального остатка',
+  '/points - ваши точки',
+  '/unlink - отвязать этот чат',
   '',
   'К большинству команд можно добавить название точки: <code>/risks Центр</code>',
   'Бот только показывает данные. Операции выполняются в веб-интерфейсе.',
@@ -117,20 +153,20 @@ function stockLine(r: StockRowDto): string {
   return `• <b>${e(r.name)}</b>, ${where}: ${parts.join(', ')}`;
 }
 
-async function today(ctx: CommandContext, args: string): Promise<string> {
+async function today(ctx: CommandContext, args: string): Promise<Reply> {
   const scope = await resolveScope(ctx, args);
-  if ('error' in scope) return scope.error;
-  return buildDigest(ctx.deps, ctx.principal, scope.locationId);
+  if ('error' in scope) return { text: scope.error };
+  return { text: await buildDigest(ctx.deps, ctx.principal, scope.locationId), buttons: MAIN_MENU };
 }
 
-async function risks(ctx: CommandContext, args: string, kind: 'risks' | 'order'): Promise<string> {
+async function risks(ctx: CommandContext, args: string, kind: 'risks' | 'order'): Promise<Reply> {
   const scope = await resolveScope(ctx, args);
-  if ('error' in scope) return scope.error;
+  if ('error' in scope) return { text: scope.error };
   const plan = await getRecommendations(ctx.deps, ctx.principal, scope.locationId);
   const wanted = kind === 'order' ? plan.items.filter((r) => r.type === 'reorder') : plan.items.filter((r) => r.type !== 'reorder' && r.type !== 'promote');
   const total = kind === 'order' ? plan.counts.reorder : plan.counts.writeoff + plan.counts.discount + plan.counts.transfer;
   const title = kind === 'order' ? 'Что заказать' : 'Что требует действий';
-  if (total === 0) return `${scoped(title, scope)}: сейчас ничего.`;
+  if (total === 0) return { text: `${scoped(title, scope)}: сейчас ничего.` };
 
   const shown = wanted.slice(0, LIST_LIMIT);
   const lines = [`<b>${scoped(title, scope)}: ${total}</b>`];
@@ -140,7 +176,39 @@ async function risks(ctx: CommandContext, args: string, kind: 'risks' | 'order')
     lines.push(`${i + 1}. <b>${e(r.headline)}</b>: ${e(r.productName)}, ${e(r.locationName)}${when}${money}`);
   });
   lines.push(...more(shown.length, total), '', 'Применить рекомендацию можно в веб-интерфейсе.');
-  return fit(lines);
+
+  // три первые рекомендации, которые сотрудник вправе применить, можно выполнить кнопкой после подтверждения
+  const buttons: Buttons = [];
+  for (const r of shown) {
+    if (buttons.length >= 3 || !r.batchId) continue;
+    if (r.action.kind === 'discount' && r.action.percent && hasRole(ctx.principal.role, 'manager')) {
+      buttons.push([{ text: cut(`Скидка ${r.action.percent}%: ${r.productName}`, 40), data: `a:${encodeAction({ kind: 'discount', batchId: r.batchId, percent: r.action.percent })}` }]);
+    } else if (r.action.kind === 'writeoff' && hasRole(ctx.principal.role, 'storekeeper')) {
+      buttons.push([{ text: cut(`Списать: ${r.productName}`, 40), data: `a:${encodeAction({ kind: 'writeoff', batchId: r.batchId })}` }]);
+    }
+  }
+  if (buttons.length > 0) lines.push('Кнопки ниже применяют рекомендацию после подтверждения.');
+  return { text: fit(lines), ...(buttons.length > 0 ? { buttons } : {}) };
+}
+
+async function hot(ctx: CommandContext, args: string): Promise<Reply> {
+  const scope = await resolveScope(ctx, args);
+  if ('error' in scope) return { text: scope.error };
+  const { items } = await getHotDishes(ctx.deps, ctx.principal, scope.locationId);
+  if (items.length === 0) return { text: `${scoped('Горячие предложения', scope)}: продвигать пока нечего, срок ингредиентов не поджимает.` };
+  const shown = items.slice(0, 5);
+  const lines = [`<b>${scoped('Горячие предложения', scope)}: ${items.length}</b>`];
+  shown.forEach((d, i) => {
+    const why = d.reasons[0];
+    const reason = why ? `${e(why.productName)}: ${describeDaysLeft(why.daysLeft)}. ` : '';
+    lines.push(`${i + 1}. <b>${e(d.dishName)}</b>, ${e(d.locationName)}, приоритет ${d.priority}. ${reason}Хватит на ${d.portions} порц., продать около ${d.portionsToPush}.`);
+  });
+  lines.push(...more(shown.length, items.length));
+  return { text: fit(lines) };
+}
+
+async function subscribe(ctx: CommandContext): Promise<Reply> {
+  return subscriptionsView(await topicsOf(ctx.deps.db, ctx.user.id));
 }
 
 const clock = (iso: string, tz: string) =>
@@ -150,7 +218,15 @@ async function stopList(ctx: CommandContext, args: string): Promise<string> {
   const scope = await resolveScope(ctx, args);
   if ('error' in scope) return scope.error;
   const list = await getStopList(ctx.deps, scope.ids);
-  if (list.entries.length === 0 && list.warnings.length === 0) return `${scoped('Стоп-лист', scope)}: пусто, всё есть в наличии.`;
+  const forecast = (await getStopForecast(ctx.deps, ctx.principal)).filter((f) => !scope.ids || scope.ids.includes(f.locationId)).slice(0, 5);
+  const forecastLines = forecast.length
+    ? [
+        '',
+        '<b>Прогноз: остановятся без новой поставки</b>',
+        ...forecast.map((f) => `• ${e(f.dishName)}, ${e(f.locationName)}: ${eta(f.hoursLeft)}, ${f.cause === 'expiry' ? 'истечёт срок' : 'не хватит'}: ${e(f.limiting.productName)}`),
+      ]
+    : [];
+  if (list.entries.length === 0 && list.warnings.length === 0) return fit([`${scoped('Стоп-лист', scope)}: пусто, всё есть в наличии.`, ...forecastLines]);
 
   const tz = ctx.deps.config.businessTz;
   const shown = list.entries.slice(0, 15);
@@ -165,6 +241,7 @@ async function stopList(ctx: CommandContext, args: string): Promise<string> {
     lines.push('', '<b>Скоро закончатся</b>');
     for (const w of list.warnings.slice(0, 5)) lines.push(`• ${e(w.name)}, ${e(w.locationName)}: ${w.portions} ${plural(w.portions, ['порция', 'порции', 'порций'])}`);
   }
+  lines.push(...forecastLines);
   return fit(lines);
 }
 
@@ -217,10 +294,11 @@ export function greeting(ctx: CommandContext): string {
 }
 
 /** Выполняет команду от имени привязанного пользователя. Привязку и отвязку обрабатывает бот. */
-export async function runCommand(ctx: CommandContext, cmd: ParsedCommand): Promise<string | null> {
+export async function runCommand(ctx: CommandContext, cmd: ParsedCommand): Promise<Reply | null> {
+  const plain = async (text: Promise<string> | string): Promise<Reply> => ({ text: await text });
   switch (cmd.name) {
     case 'help':
-      return HELP_TEXT;
+      return { text: HELP_TEXT, buttons: MAIN_MENU };
     case 'today':
     case 'summary':
       return today(ctx, cmd.args);
@@ -230,19 +308,24 @@ export async function runCommand(ctx: CommandContext, cmd: ParsedCommand): Promi
       return risks(ctx, cmd.args, 'order');
     case 'stoplist':
     case 'stop':
-      return stopList(ctx, cmd.args);
+      return plain(stopList(ctx, cmd.args));
+    case 'hot':
+      return hot(ctx, cmd.args);
+    case 'subscribe':
+    case 'settings':
+      return subscribe(ctx);
     case 'expiring':
-      return stockByFlag(ctx, cmd.args, 'expiring');
+      return plain(stockByFlag(ctx, cmd.args, 'expiring'));
     case 'expired':
-      return stockByFlag(ctx, cmd.args, 'expired');
+      return plain(stockByFlag(ctx, cmd.args, 'expired'));
     case 'low':
-      return stockByFlag(ctx, cmd.args, 'low');
+      return plain(stockByFlag(ctx, cmd.args, 'low'));
     case 'stock':
-      return stock(ctx, cmd.args);
+      return plain(stock(ctx, cmd.args));
     case 'points':
-      return points(ctx);
+      return plain(points(ctx));
     case 'whoami':
-      return whoami(ctx);
+      return plain(whoami(ctx));
     default:
       return null;
   }
@@ -253,7 +336,9 @@ export const MENU_COMMANDS = [
   { command: 'today', description: 'Сводка по моим точкам' },
   { command: 'risks', description: 'Что требует действий' },
   { command: 'order', description: 'Что заказать' },
-  { command: 'stoplist', description: 'Стоп-лист' },
+  { command: 'stoplist', description: 'Стоп-лист и прогноз' },
+  { command: 'hot', description: 'Горячие предложения' },
+  { command: 'subscribe', description: 'Уведомления' },
   { command: 'stock', description: 'Остатки продукта: /stock молоко' },
   { command: 'expiring', description: 'Скоро истекает' },
   { command: 'expired', description: 'Просрочено' },

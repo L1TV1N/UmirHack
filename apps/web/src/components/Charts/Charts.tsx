@@ -1,4 +1,4 @@
-import { formatMoneyWhole, formatNumber, type ExpiryBucketDto, type WriteoffTrendPoint } from '@zapas/shared';
+import { formatMoneyWhole, formatNumber, type DemandDayDto, type ExpiryBucketDto, type WriteoffTrendPoint } from '@zapas/shared';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { fmtShortDate } from '../../lib/format';
 import styles from './Charts.module.scss';
@@ -193,6 +193,87 @@ export function SalesHistory({ history, velocity, unit }: { history: { date: str
           {history.at(-1) ? fmtShortDate(history.at(-1)!.date) : ''}
         </text>
       </svg>
+    </div>
+  );
+}
+
+const DEMAND_H = 200;
+
+/**
+ * Факт за последние недели и прогноз спроса на ближайшие дни. У прогноза показан диапазон, в котором спрос окажется
+ * в большинстве случаев; дни с праздником, акцией или осадками помечены точкой под осью.
+ */
+export function DemandChart({ history, forecast, unit }: { history: { date: string; qty: number; fitted: number }[]; forecast: DemandDayDto[]; unit: string }) {
+  const [box, W] = useWidth();
+  const all = history.length + forecast.length;
+  const top = niceMax(Math.max(...history.map((h) => Math.max(h.qty, h.fitted)), ...forecast.map((f) => f.high), 0.001));
+  const innerW = W - PAD.l - PAD.r;
+  const innerH = DEMAND_H - PAD.t - PAD.b - 10;
+  const slot = innerW / Math.max(all, 1);
+  const barW = Math.max(3, slot * 0.6);
+  const y = (v: number) => PAD.t + innerH - (v / top) * innerH;
+  const cx = (i: number) => PAD.l + i * slot + slot / 2;
+  const fitted = history.map((h, i) => `${i === 0 ? 'M' : 'L'}${cx(i).toFixed(1)},${y(h.fitted).toFixed(1)}`).join(' ');
+  const mark = (tags: string[]) => tags.some((t) => t.startsWith('праздник') || t === 'акция' || t === 'дождь');
+
+  return (
+    <div ref={box}>
+      <svg className={styles.chart} width={W} height={DEMAND_H} viewBox={`0 0 ${W} ${DEMAND_H}`} role="img" aria-label={`Расход по дням и прогноз спроса, ${unit}`}>
+        {[0, top / 2, top].map((g) => (
+          <g key={g}>
+            <line x1={PAD.l} x2={W - PAD.r} y1={y(g)} y2={y(g)} stroke="var(--line)" />
+            <text className={styles.axis} x={PAD.l - 8} y={y(g) + 4} textAnchor="end">
+              {formatNumber(g)}
+            </text>
+          </g>
+        ))}
+        {history.map((h, i) => (
+          <g key={h.date}>
+            <title>{`${fmtShortDate(h.date)}: продано ${formatNumber(h.qty)} ${unit}, по модели ${formatNumber(h.fitted)}`}</title>
+            <rect x={cx(i) - barW / 2} y={y(h.qty)} width={barW} height={Math.max(innerH - (y(h.qty) - PAD.t), h.qty > 0 ? 1 : 0)} fill="var(--brand-300)" rx="1" />
+          </g>
+        ))}
+        {history.length > 1 && <path d={fitted} fill="none" stroke="var(--brand-800)" strokeWidth="1.5" strokeDasharray="4 3" />}
+        <line x1={PAD.l + history.length * slot} x2={PAD.l + history.length * slot} y1={PAD.t} y2={PAD.t + innerH} stroke="var(--ink-400)" strokeDasharray="2 3" />
+        {forecast.map((f, i) => {
+          const x = cx(history.length + i);
+          return (
+            <g key={f.date}>
+              <title>{`${fmtShortDate(f.date)}: ожидается ${formatNumber(f.qty)} ${unit} (от ${formatNumber(f.low)} до ${formatNumber(f.high)})${f.tags.length ? `. ${f.tags.join(', ')}` : ''}`}</title>
+              <rect x={x - barW / 2} y={y(f.high)} width={barW} height={Math.max(y(f.low) - y(f.high), 1)} fill="var(--brand-100)" />
+              <rect x={x - barW / 2} y={y(f.qty) - 1.5} width={barW} height={3} fill="var(--brand-600)" rx="1" />
+              {mark(f.tags) && <circle cx={x} cy={DEMAND_H - 16} r="2.5" fill="var(--warn-600)" />}
+            </g>
+          );
+        })}
+        <text className={styles.axis} x={PAD.l} y={DEMAND_H - 4} textAnchor="start">
+          {history[0] ? fmtShortDate(history[0].date) : ''}
+        </text>
+        <text className={styles.axis} x={PAD.l + history.length * slot + 4} y={PAD.t + 10} textAnchor="start" style={{ fill: 'var(--ink-500)' }}>
+          прогноз →
+        </text>
+        <text className={styles.axis} x={W - PAD.r} y={DEMAND_H - 4} textAnchor="end">
+          {forecast.at(-1) ? fmtShortDate(forecast.at(-1)!.date) : ''}
+        </text>
+      </svg>
+      <div className={styles.legend}>
+        <span>
+          <i style={{ background: 'var(--brand-300)' }} />
+          Продано
+        </span>
+        <span>
+          <i style={{ background: 'var(--brand-600)' }} />
+          Прогноз
+        </span>
+        <span>
+          <i style={{ background: 'var(--brand-100)', outline: '1px solid var(--brand-200)' }} />
+          Обычный диапазон
+        </span>
+        <span>
+          <i style={{ background: 'var(--warn-600)', borderRadius: '50%' }} />
+          Праздник, акция или дождь
+        </span>
+      </div>
     </div>
   );
 }

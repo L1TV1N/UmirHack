@@ -22,7 +22,11 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "audit:prod": "npm audit --omit=dev",
-    "create-admin": "npm run create-admin -w @zapas/server"
+    "create-admin": "npm run create-admin -w @zapas/server",
+    "emulate": "npm run emulate -w @zapas/server --",
+    "emulate:onec": "npm run emulate:onec -w @zapas/server --",
+    "emulate:pos": "npm run emulate:pos -w @zapas/server --",
+    "emulate:setup": "npm run emulate:setup -w @zapas/server --"
   },
   "devDependencies": {
     "npm-run-all2": "^8.0.0",

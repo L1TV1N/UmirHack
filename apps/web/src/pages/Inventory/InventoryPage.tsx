@@ -52,7 +52,7 @@ export default function InventoryPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    document.title = 'Инвентаризация — Запас';
+    document.title = 'Инвентаризация - Запас';
   }, []);
   // Фоновое обновление (например, при возврате на вкладку) не должно стирать то, что человек ещё не сохранил
   const serverRef = useRef<Record<string, Edit>>({});
@@ -248,7 +248,7 @@ export default function InventoryPage() {
       align: 'right',
       cell: (r) =>
         r.diff === null || r.diff === 0 ? (
-          <span className="muted">{r.diff === 0 ? 'совпало' : '—'}</span>
+          <span className="muted">{r.diff === 0 ? 'совпало' : '-'}</span>
         ) : (
           <span className={r.diff < 0 ? styles.neg : styles.pos}>
             <strong className="num">
@@ -276,10 +276,10 @@ export default function InventoryPage() {
               aria-invalid={!r.edit.surplus || undefined}
             />
           ) : (
-            <span className="num">{r.line.surplusExpiresOn ?? '—'}</span>
+            <span className="num">{r.line.surplusExpiresOn ?? '-'}</span>
           )
         ) : (
-          <span className="muted">—</span>
+          <span className="muted">-</span>
         ),
     },
   ];

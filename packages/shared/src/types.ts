@@ -293,6 +293,121 @@ export interface LowPortionDto {
   portions: number;
 }
 
+export interface StopForecastDto {
+  dishId: string;
+  dishName: string;
+  locationId: string;
+  locationName: string;
+  /** Когда блюдо перестанет готовиться, если новых поставок не будет. */
+  expectedAt: string;
+  hoursLeft: number;
+  /** depletion: остаток разойдётся при текущих продажах. expiry: закончится срок годности. */
+  cause: 'depletion' | 'expiry';
+  portionsNow: number;
+  limiting: {
+    productId: string;
+    productName: string;
+    unit: Unit;
+    availableNow: number;
+    perPortion: number;
+    perDay: number | null;
+  };
+}
+
+/** Веса составляющих оценки поставщика, в сумме 1. Если составляющей нет (не было заказов), оценка считается по остальным. */
+export const SUPPLIER_SCORE_WEIGHTS = { fill: 0.35, onTime: 0.25, freshness: 0.2, quality: 0.2 } as const;
+/** Остаток срока годности при приёмке, начиная с которого свежесть оценивается полностью. */
+export const FRESHNESS_FULL = 0.8;
+/** Доля потерь от порчи и боя к принятому, при которой оценка качества нулевая. */
+export const SPOILAGE_ZERO_AT = 0.05;
+
+export interface SupplierScoreDto {
+  supplierId: string;
+  supplierName: string;
+  /** От 0 до 100. null: за период нет ни заказов, ни приходов. */
+  score: number | null;
+  grade: 'A' | 'B' | 'C' | null;
+  /** Заказов в расчёте: отправленных, срок которых наступил. */
+  orders: number;
+  /** Какую часть заказанного по стоимости привезли, от 0 до 1. */
+  fillRate: number | null;
+  /** Доля заказов, первая поставка по которым пришла не позже обещанной даты. */
+  onTimeRate: number | null;
+  /** Средняя задержка по заказам в днях, с учётом не привезённых до сих пор. */
+  avgDelayDays: number | null;
+  /** Какая доля срока годности в среднем оставалась при приёмке (по стоимости), от 0 до 1. */
+  freshness: number | null;
+  receivedValue: number;
+  /** Потери по партиям поставщика за период, все причины, по себестоимости. */
+  lossValue: number;
+  /** Доля порчи и боя к принятому. */
+  spoilageRate: number | null;
+  losses: { reason: WriteoffReason; value: number }[];
+}
+
+export interface SupplierRatingDto {
+  days: number;
+  suppliers: SupplierScoreDto[];
+  /** Потери по причинам за период по всем партиям, включая те, у которых поставщик не указан. */
+  lossesByReason: { reason: WriteoffReason; value: number }[];
+  totalLoss: number;
+}
+
+export interface RescuedProductDto {
+  productId: string;
+  productName: string;
+  unit: Unit;
+  quantity: number;
+  revenue: number;
+  /** Себестоимость проданного: столько пропало бы при списании. */
+  cost: number;
+}
+
+export interface RescuedStatsDto {
+  days: number;
+  /** Выручка с товара, проданного по скидке: без скидки он, скорее всего, дошёл бы до списания. */
+  revenue: number;
+  /** Себестоимость проданного по скидке: столько пропало бы при списании. */
+  cost: number;
+  /** Сколько недополучено против обычной цены. */
+  discountGiven: number;
+  /** Сколько партий уценили и продали хотя бы частично. */
+  batches: number;
+  /** Что чаще всего спасали, по выручке. */
+  products: RescuedProductDto[];
+}
+
+export interface ShortageIngredientDto {
+  productId: string;
+  productName: string;
+  unit: Unit;
+  /** Сколько раз продукт становился причиной остановки блюд или заканчивался. */
+  episodes: number;
+  /** Сколько часов суммарно по точкам он не давал приготовить блюдо. */
+  hours: number;
+  /** Сколько блюд одновременно останавливалось из-за него в худший момент. */
+  dishesBlocked: number;
+  /** Сколько заказов отклонили из-за него. */
+  refusedOrders: number;
+  /** Сумма отклонённых заказов с этим продуктом. */
+  lostRevenue: number;
+  /** Нехватка продолжается сейчас. */
+  ongoing: boolean;
+}
+
+export interface ShortageStatsDto {
+  days: number;
+  /** Самые дефицитные ингредиенты: сначала те, что дольше всего не давали готовить. */
+  ingredients: ShortageIngredientDto[];
+  totals: {
+    episodes: number;
+    hours: number;
+    /** Заказов, отклонённых из-за нехватки, и их общая сумма. */
+    refusedOrders: number;
+    lostRevenue: number;
+  };
+}
+
 export interface StopListDto {
   entries: StopListEntryDto[];
   warnings: LowPortionDto[];
@@ -329,6 +444,55 @@ export interface RecommendationDto {
   recoveryValue?: number;
   dishes?: { id: string; name: string; portions: number }[];
   reorder?: { suggestedQty: number; daysToZero: number | null; velocityPerDay: number };
+}
+
+export interface HotDishReasonDto {
+  productId: string;
+  productName: string;
+  unit: Unit;
+  /** Сколько суток до конца срока у ближайшей партии ингредиента. */
+  daysLeft: number;
+  /** Сколько ингредиента лежит в ближайших по сроку партиях. */
+  stockQty: number;
+  /** Расход ингредиента на порцию. */
+  perPortion: number;
+  /** Сколько порций нужно продать, чтобы использовать долю остатка, доставшуюся блюду. */
+  portionsToUse: number;
+  /** Какую часть истекающего остатка блюдо может израсходовать, от 0 до 1. */
+  share: number;
+  /** Вклад ингредиента в приоритет, от 0 до 1. */
+  contribution: number;
+  /** Себестоимость той части остатка, которую блюдо может израсходовать. */
+  value: number;
+  /** Другие горячие блюда, которым нужен тот же остаток. */
+  sharedWith: string[];
+}
+
+export interface HotDishDto {
+  dishId: string;
+  dishName: string;
+  price: number;
+  locationId: string;
+  locationName: string;
+  /** От 0 до 100, чем больше, тем настойчивее стоит продвигать. */
+  priority: number;
+  /** Сколько порций можно приготовить из текущих остатков. */
+  portions: number;
+  /** Сколько порций продать, чтобы израсходовать главный ингредиент: тот, что сильнее всего влияет на приоритет. */
+  portionsToPush: number;
+  /** Самый близкий срок среди причин. */
+  daysLeft: number;
+  /** Себестоимость истекающих продуктов, которые блюдо может израсходовать. */
+  atRiskValue: number;
+  reasons: HotDishReasonDto[];
+  headline: string;
+  details: string;
+}
+
+export interface HotDishesDto {
+  asOf: string;
+  locationId: string | null;
+  items: HotDishDto[];
 }
 
 export interface RecommendationsDto {
@@ -372,6 +536,8 @@ export interface DashboardDto {
   writeoffTrend: WriteoffTrendPoint[];
   writeoffByReason: { reason: WriteoffReason; value: number }[];
   topRisks: RecommendationDto[];
+  /** Блюда, которые стоит продвигать, первые пять. */
+  hotDishes: HotDishDto[];
   stopList: StopListEntryDto[];
 }
 
@@ -414,6 +580,8 @@ export interface SettingsDto {
   reorderCoverDays: number;
   lowPortionThreshold: number;
   digestHour: number;
+  useDemandModel: boolean;
+  autoWriteoffExpired: boolean;
   telegramConfigured: boolean;
 }
 
@@ -447,4 +615,18 @@ export interface TelegramLinkCodeDto {
   expiresAt: string;
   /** Ссылка, которая открывает бота и сразу отправляет ему код. */
   deepLink: string | null;
+}
+
+/** Один пункт самопроверки: пройден, предупреждение или сбой. */
+export interface SelfCheckItemDto {
+  id: string;
+  group: string;
+  title: string;
+  status: 'ok' | 'warn' | 'fail';
+  detail: string;
+}
+
+export interface SelfCheckDto {
+  checkedAt: string;
+  items: SelfCheckItemDto[];
 }

@@ -1,6 +1,8 @@
+import { ScanBarcode } from 'lucide-react';
 import { useEffect } from 'react';
 import { useAuth } from '../../auth/AuthProvider';
 import { useScope } from '../../auth/ScopeProvider';
+import { LinkButton } from '../../components/Button/Button';
 import { EmptyState } from '../../components/Feedback/Feedback';
 import { PageHeader, Panel } from '../../components/Panel/Panel';
 import { Tabs } from '../../components/Tabs/Tabs';
@@ -24,12 +26,14 @@ export default function OperationsPage() {
   const noLocations = !scope.loading && scope.activeLocations.length === 0;
 
   useEffect(() => {
-    document.title = 'Операции — Запас';
+    document.title = 'Операции - Запас';
   }, []);
 
   return (
     <>
-      <PageHeader title="Операции" subtitle="Приход, продажа, списание и перемещение. Каждая операция создаёт документ и движения по партиям." />
+      <PageHeader title="Операции" subtitle="Приход, заказ гостя, списание и перемещение. Каждая операция создаёт документ и движения по партиям."
+        actions={can('manager') ? <LinkButton to="/testing?tab=barcodes" icon={<ScanBarcode size={16} />}>Штрихкоды для проверки</LinkButton> : undefined}
+      />
       <Tabs<Tab>
         label="Операции"
         value={current}
@@ -38,7 +42,7 @@ export default function OperationsPage() {
           ...(canWrite
             ? ([
                 { value: 'receipt', label: 'Приход' },
-                { value: 'sale', label: 'Продажа' },
+                { value: 'sale', label: 'Заказ гостя' },
                 { value: 'writeoff', label: 'Списание' },
                 { value: 'transfer', label: 'Перемещение' },
               ] as const)

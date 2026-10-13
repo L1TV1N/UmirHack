@@ -18,8 +18,8 @@
   margin-bottom: 12px;
 }
 
-.overdue {
-  background: var(--danger-50);
+.overdue td:first-child {
+  box-shadow: inset 3px 0 0 var(--danger-600);
 }
 
 .dialog {

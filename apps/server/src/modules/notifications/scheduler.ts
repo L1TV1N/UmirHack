@@ -5,6 +5,8 @@ import { getSettings } from '../settings/settings';
 import { publishStopList } from '../integrations/service';
 import { autoDraftOrders } from '../orders/service';
 import { activeLocationIds, syncStopList } from '../stoplist/service';
+import { autoWriteoffExpired, describeAutoWriteoff } from '../stock/auto-writeoff';
+import { sendPersonalDigests } from '../telegram/delivery';
 import { purgeExpiredCodes } from '../telegram/links';
 import { sendDigest } from './digest';
 
@@ -32,9 +34,33 @@ export async function schedulerTick(deps: Deps): Promise<void> {
 
     const settings = await getSettings(deps.db);
     const now = deps.clock();
+    const key = businessToday(deps);
+
+    // просроченное списывается один раз за сутки, в первую же минуту после полуночи по времени бизнеса или при первом запуске
+    if (settings.autoWriteoffExpired) {
+      const written = await trx
+        .insertInto('notification_log')
+        .values({ kind: 'auto_writeoff', dedupe_key: key, sent_at: now })
+        .onConflict((oc) => oc.doNothing())
+        .returning('id')
+        .executeTakeFirst();
+      if (written) {
+        const result = await autoWriteoffExpired(deps).catch((err) => {
+          deps.log.error({ err }, 'не удалось выполнить автоматическое списание');
+          return null;
+        });
+        if (!result || result.failed.length > 0) {
+          // не всё получилось: отметку снимаем, и на следующей минуте попробуем снова
+          await trx.deleteFrom('notification_log').where('id', '=', written.id).execute();
+        }
+        if (result && result.documents > 0 && deps.notifier.enabled) {
+          await deps.notifier.send(describeAutoWriteoff(result.documents)).catch((err) => deps.log.error({ err }, 'не удалось отправить сообщение об автосписании'));
+        }
+      }
+    }
+
     if (hourIn(deps.config.businessTz, now) !== settings.digestHour) return;
 
-    const key = businessToday(deps);
     // черновики заказов по поставщикам с автозаказом: раз в сутки, независимо от того, подключён ли Telegram
     const orders = await trx
       .insertInto('notification_log')
@@ -51,6 +77,9 @@ export async function schedulerTick(deps: Deps): Promise<void> {
         await trx.deleteFrom('notification_log').where('id', '=', orders.id).execute();
       }
     }
+
+    // личные сводки по подпискам идут независимо от общего чата
+    await sendPersonalDigests(deps).catch((err) => deps.log.error({ err }, 'не удалось разослать личные сводки'));
 
     if (!deps.notifier.enabled) return;
     const marker = await trx
@@ -81,7 +110,7 @@ async function cleanup(deps: Deps): Promise<void> {
     .where('revoked_at', 'is not', null)
     .where('revoked_at', '<', sessionCutoff)
     .execute();
-  await deps.db.deleteFrom('notification_log').where('kind', '=', 'digest').where('sent_at', '<', logCutoff).execute();
+  await deps.db.deleteFrom('notification_log').where('sent_at', '<', logCutoff).execute();
   await deps.db.deleteFrom('webhook_deliveries').where('status', '<>', 'pending').where('created_at', '<', new Date(now.getTime() - 30 * 86_400_000)).execute();
   await purgeExpiredCodes(deps.db, deps.clock());
 }

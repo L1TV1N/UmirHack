@@ -17,7 +17,7 @@ const TONE: Record<RecommendationType, Tone> = {
   reorder: 'neutral',
 };
 
-function daysTone(days: number): Tone {
+export function daysTone(days: number): Tone {
   if (days < 0) return 'danger';
   if (days <= 1) return 'warn';
   if (days <= 3) return 'amber';

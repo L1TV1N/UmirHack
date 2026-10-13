@@ -29,6 +29,8 @@ export interface TelegramLinksTable {
   chat_id: Numeric;
   username: string | null;
   linked_at: Timestamp;
+  /** Темы уведомлений в личный чат. */
+  topics: ColumnType<string[], string[] | undefined, string[]>;
 }
 
 export interface TelegramLinkCodesTable {
@@ -78,6 +80,8 @@ export interface ApiKeysTable {
   created_at: Timestamp;
   last_used_at: TimestampNullable;
   revoked_at: TimestampNullable;
+  vendor: Generated<'generic' | 'evotor' | 'frontol' | 'atol' | 'iiko' | 'sigma'>;
+  rules: ColumnType<unknown, string | null | undefined, string | null>;
 }
 
 export interface CategoriesTable {
@@ -179,6 +183,8 @@ export interface DocumentsTable {
   idempotency_scope: string | null;
   idempotency_key: string | null;
   idempotency_hash: string | null;
+  /** Заказ поставщику, по которому принят приход. */
+  order_id: ColumnType<string | null, string | null | undefined, string | null>;
   created_at: Timestamp;
 }
 
@@ -304,6 +310,73 @@ export interface WeatherDailyTable {
   fetched_at: Timestamp;
 }
 
+export interface ShortageEpisodesTable {
+  id: Generated<number>;
+  location_id: string;
+  product_id: string;
+  started_at: Timestamp;
+  ended_at: TimestampNullable;
+  dishes_blocked: Generated<number>;
+}
+
+export interface SaleRefusalsTable {
+  id: Generated<number>;
+  location_id: string;
+  created_at: Timestamp;
+  order_total: Numeric;
+  missing: string[];
+  source: 'user' | 'pos';
+}
+
+export interface HaccpPointsTable {
+  id: Generated<string>;
+  location_id: string;
+  name: string;
+  kind: 'fridge' | 'freezer' | 'hot' | 'other';
+  min_temp: Numeric;
+  max_temp: Numeric;
+  every_hours: Generated<number>;
+  is_active: Generated<boolean>;
+  created_at: Timestamp;
+}
+
+export interface HaccpReadingsTable {
+  id: Generated<number>;
+  point_id: string;
+  location_id: string;
+  measured_at: Timestamp;
+  value: Numeric;
+  min_temp: Numeric;
+  max_temp: Numeric;
+  in_range: boolean;
+  comment: string | null;
+  created_by: string | null;
+  actor_name: string;
+  created_at: Timestamp;
+}
+
+export interface HaccpActionsTable {
+  reading_id: number;
+  action: string;
+  created_by: string | null;
+  actor_name: string;
+  created_at: Timestamp;
+}
+
+export interface HaccpInspectionsTable {
+  id: Generated<number>;
+  batch_id: string;
+  location_id: string;
+  temperature: NumericNullable;
+  appearance_ok: boolean;
+  packaging_ok: boolean;
+  decision: 'accepted' | 'rejected';
+  comment: string | null;
+  created_by: string | null;
+  actor_name: string;
+  created_at: Timestamp;
+}
+
 export interface CalendarDaysTable {
   day: DateOnly;
   kind: 'off' | 'work';
@@ -384,7 +457,79 @@ export interface StoplistPublishedTable {
   published_at: Timestamp;
 }
 
+export interface ExternalSystemsTable {
+  id: Generated<string>;
+  kind: 'onec' | 'iiko';
+  name: string;
+  base_url: string;
+  username: string | null;
+  secret_enc: string | null;
+  profile: ColumnType<unknown, string, string>;
+  doc_kinds: string[];
+  location_id: string | null;
+  enabled: Generated<boolean>;
+  last_ok_at: TimestampNullable;
+  last_error: string | null;
+  created_by: string | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface ExternalRefsTable {
+  system_id: string;
+  entity: 'product' | 'supplier' | 'location' | 'document';
+  local_id: string;
+  remote_key: string;
+  remote_number: string | null;
+  updated_at: Timestamp;
+}
+
+export interface ExchangeJobsTable {
+  id: Generated<string>;
+  system_id: string;
+  document_id: string;
+  status: Generated<'pending' | 'done' | 'blocked' | 'failed'>;
+  attempts: Generated<number>;
+  next_attempt_at: Timestamp;
+  last_error: string | null;
+  remote_key: string | null;
+  remote_number: string | null;
+  missing: ColumnType<unknown, string | null | undefined, string | null>;
+  created_at: Timestamp;
+  done_at: TimestampNullable;
+}
+
+export interface PosInboxTable {
+  id: Generated<string>;
+  key_id: string;
+  location_id: string;
+  external_id: string;
+  kind: 'sale' | 'return';
+  status: 'done' | 'pending_match' | 'rejected' | 'return_logged';
+  lines: ColumnType<unknown, string, string>;
+  unmatched: Generated<string[]>;
+  error: string | null;
+  document_id: string | null;
+  received_at: Timestamp;
+  processed_at: TimestampNullable;
+}
+
+export interface PosCodeMapTable {
+  id: Generated<string>;
+  key_id: string;
+  ref: string;
+  entity: 'product' | 'dish' | 'ignore';
+  entity_id: string | null;
+  created_by: string | null;
+  created_at: Timestamp;
+}
+
 export interface Database {
+  external_systems: ExternalSystemsTable;
+  external_refs: ExternalRefsTable;
+  exchange_jobs: ExchangeJobsTable;
+  pos_inbox: PosInboxTable;
+  pos_code_map: PosCodeMapTable;
   users: UsersTable;
   locations: LocationsTable;
   user_locations: UserLocationsTable;
@@ -393,6 +538,12 @@ export interface Database {
   vet_certificates: VetCertificatesTable;
   weather_daily: WeatherDailyTable;
   calendar_days: CalendarDaysTable;
+  haccp_points: HaccpPointsTable;
+  haccp_readings: HaccpReadingsTable;
+  haccp_actions: HaccpActionsTable;
+  haccp_inspections: HaccpInspectionsTable;
+  shortage_episodes: ShortageEpisodesTable;
+  sale_refusals: SaleRefusalsTable;
   demand_outlook: DemandOutlookTable;
   purchase_orders: PurchaseOrdersTable;
   purchase_order_lines: PurchaseOrderLinesTable;

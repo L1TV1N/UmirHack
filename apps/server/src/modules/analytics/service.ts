@@ -5,12 +5,21 @@ import {
   type DashboardDto,
   type ExpiryBucketDto,
   type ForecastDto,
+  type HotDishDto,
+  type HotDishesDto,
   type RecommendationsDto,
   type RecommendationType,
+  type RescuedProductDto,
+  type RescuedStatsDto,
+  type ShortageIngredientDto,
+  type ShortageStatsDto,
+  type StopListDto,
   type WriteoffReason,
+  type Unit,
   type WriteoffTrendPoint,
 } from '@zapas/shared';
 import { sql } from 'kysely';
+import { computeHotDishes } from '../../domain/hot-dishes';
 import { computeBatchRisks } from '../../domain/risk';
 import { draftRecommendations, selectRecommendations, type Draft, type RecommendationFilter, type RecommendationPlan } from '../../domain/recommendations';
 import { stockKey } from '../../domain/stoplist';
@@ -71,6 +80,29 @@ export async function getRecommendations(
     ...(requestedLocation ? { locationIds: [requestedLocation] } : {}),
     ...(type ? { types: [type] } : {}),
   });
+}
+
+/** Длиннее список человек не прочитает. */
+export const MAX_HOT_DISHES = 30;
+
+/** Горячие блюда для выбранных точек. Блюда и продукты из стоп-листа в список не попадают. */
+function hotDishesFrom(snap: Snapshot, stop: StopListDto, scopeIds: string[] | null): HotDishDto[] {
+  const blockedDishes = new Set<string>();
+  const blockedProducts = new Set<string>();
+  for (const e of stop.entries) (e.entityType === 'dish' ? blockedDishes : blockedProducts).add(`${e.entityId}|${e.locationId}`);
+  return computeHotDishes(
+    { products: snap.products, locations: snap.locations, batches: snap.batches, velocities: snap.velocities, dishes: snap.dishes, stock: snap.stock, blockedDishes, blockedProducts },
+    { locationIds: scopeIds, limit: MAX_HOT_DISHES },
+  );
+}
+
+export async function getHotDishes(deps: Deps, principal: Principal, requestedLocation?: string): Promise<HotDishesDto> {
+  const allowed = locationFilter(principal);
+  if (requestedLocation) assertLocation(principal, requestedLocation);
+  const scopeIds = requestedLocation ? [requestedLocation] : allowed;
+  const snap = await getSnapshot(deps, allowed);
+  const stop = await getStopList(deps, scopeIds, snap);
+  return { asOf: deps.clock().toISOString(), locationId: requestedLocation ?? null, items: hotDishesFrom(snap, stop, scopeIds) };
 }
 
 const BUCKETS: { key: ExpiryBucketDto['key']; label: string; test: (d: number) => boolean }[] = [
@@ -266,7 +298,121 @@ export async function getDashboard(deps: Deps, principal: Principal, requestedLo
       .map(([reason, value]) => ({ reason, value: roundMoney(value) }))
       .sort((a, b) => b.value - a.value),
     topRisks: recs.slice(0, 6),
+    hotDishes: hotDishesFrom(snap, stopList, scopeIds).slice(0, 5),
     stopList: stopList.entries.slice(0, 8),
+  };
+}
+
+const RESCUED_TOP = 8;
+
+/** Сколько выручили с товара, который продали по скидке, пока не истёк срок. Скидка считается действующей на момент продажи. */
+export async function getRescuedStats(deps: Deps, principal: Principal, requestedLocation: string | undefined, days: number): Promise<RescuedStatsDto> {
+  const allowed = locationFilter(principal);
+  if (requestedLocation) assertLocation(principal, requestedLocation);
+  const scopeIds = requestedLocation ? [requestedLocation] : allowed;
+  const now = deps.clock();
+  const from = new Date(now.getTime() - days * 86_400_000);
+  const scope = scopeIds ? sql`AND m.location_id IN (${inList(scopeIds.length ? scopeIds : NO_SCOPE)})` : sql``;
+
+  const rows = await sql<{ product_id: string; name: string; unit: Unit; qty: string; revenue: string; cost: string; discount: string; batches: string }>`
+    SELECT m.product_id, p.name, p.unit,
+           sum(-m.quantity) AS qty,
+           sum(-m.quantity * m.unit_price) AS revenue,
+           sum(-m.quantity * m.unit_cost) AS cost,
+           sum(-m.quantity * greatest(p.price - m.unit_price, 0)) AS discount,
+           count(DISTINCT m.batch_id) AS batches
+    FROM stock_movements m
+    JOIN products p ON p.id = m.product_id
+    WHERE m.type = 'sale' AND m.dish_id IS NULL AND m.unit_price IS NOT NULL
+      AND m.created_at >= ${from}::timestamptz AND m.created_at <= ${now}::timestamptz
+      AND EXISTS (
+        SELECT 1 FROM promotions pr
+        WHERE pr.batch_id = m.batch_id AND pr.created_at <= m.created_at AND (pr.cancelled_at IS NULL OR pr.cancelled_at > m.created_at)
+      )
+      ${scope}
+    GROUP BY m.product_id, p.name, p.unit`.execute(deps.db);
+
+  const products: RescuedProductDto[] = rows.rows
+    .map((r) => ({ productId: r.product_id, productName: r.name, unit: r.unit, quantity: Math.round(Number(r.qty) * 1000) / 1000, revenue: roundMoney(Number(r.revenue)), cost: roundMoney(Number(r.cost)) }))
+    .sort((a, b) => b.revenue - a.revenue);
+  return {
+    days,
+    revenue: roundMoney(rows.rows.reduce((sum, r) => sum + Number(r.revenue), 0)),
+    cost: roundMoney(rows.rows.reduce((sum, r) => sum + Number(r.cost), 0)),
+    discountGiven: roundMoney(rows.rows.reduce((sum, r) => sum + Number(r.discount), 0)),
+    batches: rows.rows.reduce((sum, r) => sum + Number(r.batches), 0),
+    products: products.slice(0, RESCUED_TOP),
+  };
+}
+
+const NO_SCOPE = ['00000000-0000-0000-0000-000000000000'];
+const SHORTAGES_LIMIT = 10;
+
+/** Самые дефицитные ингредиенты за период: сколько времени не давали готовить блюда и сколько заказов из-за них отклонено. */
+export async function getShortageStats(deps: Deps, principal: Principal, requestedLocation: string | undefined, days: number): Promise<ShortageStatsDto> {
+  const allowed = locationFilter(principal);
+  if (requestedLocation) assertLocation(principal, requestedLocation);
+  const scopeIds = requestedLocation ? [requestedLocation] : allowed;
+  const now = deps.clock();
+  const from = new Date(now.getTime() - days * 86_400_000);
+  const scoped = (column: string) => (scopeIds ? sql`AND ${sql.raw(column)} IN (${inList(scopeIds.length ? scopeIds : NO_SCOPE)})` : sql``);
+
+  const episodes = await sql<{ product_id: string; name: string; unit: Unit; episodes: string; hours: string; dishes: number; ongoing: boolean }>`
+    SELECT e.product_id, p.name, p.unit, count(*) AS episodes,
+           sum(extract(epoch FROM (least(coalesce(e.ended_at, ${now}::timestamptz), ${now}::timestamptz) - greatest(e.started_at, ${from}::timestamptz))) / 3600.0) AS hours,
+           max(e.dishes_blocked) AS dishes, bool_or(e.ended_at IS NULL) AS ongoing
+    FROM shortage_episodes e
+    JOIN products p ON p.id = e.product_id
+    WHERE e.started_at <= ${now}::timestamptz AND coalesce(e.ended_at, ${now}::timestamptz) > ${from}::timestamptz ${scoped('e.location_id')}
+    GROUP BY e.product_id, p.name, p.unit`.execute(deps.db);
+
+  const refusals = await sql<{ product_id: string; orders: string; lost: string }>`
+    SELECT m AS product_id, count(*) AS orders, sum(r.order_total) AS lost
+    FROM sale_refusals r
+    CROSS JOIN LATERAL unnest(r.missing) AS m
+    WHERE r.created_at >= ${from}::timestamptz AND r.created_at <= ${now}::timestamptz ${scoped('r.location_id')}
+    GROUP BY m`.execute(deps.db);
+  const refusalTotals = await sql<{ orders: string; lost: string | null }>`
+    SELECT count(*) AS orders, sum(r.order_total) AS lost
+    FROM sale_refusals r
+    WHERE r.created_at >= ${from}::timestamptz AND r.created_at <= ${now}::timestamptz ${scoped('r.location_id')}`.execute(deps.db);
+
+  const refusalBy = new Map(refusals.rows.map((r) => [r.product_id, { orders: Number(r.orders), lost: Number(r.lost) }]));
+  const byProduct = new Map<string, ShortageIngredientDto>();
+  for (const e of episodes.rows) {
+    const refused = refusalBy.get(e.product_id);
+    byProduct.set(e.product_id, {
+      productId: e.product_id,
+      productName: e.name,
+      unit: e.unit,
+      episodes: Number(e.episodes),
+      hours: Math.round(Number(e.hours) * 10) / 10,
+      dishesBlocked: Number(e.dishes),
+      refusedOrders: refused?.orders ?? 0,
+      lostRevenue: roundMoney(refused?.lost ?? 0),
+      ongoing: e.ongoing,
+    });
+  }
+  // продукт мог не дойти до остановки блюда, но уже срывать заказы
+  const onlyRefused = [...refusalBy.keys()].filter((id) => !byProduct.has(id));
+  if (onlyRefused.length > 0) {
+    const rows = await deps.db.selectFrom('products').select(['id', 'name', 'unit']).where('id', 'in', onlyRefused).execute();
+    for (const p of rows) {
+      const refused = refusalBy.get(p.id) as { orders: number; lost: number };
+      byProduct.set(p.id, { productId: p.id, productName: p.name, unit: p.unit, episodes: 0, hours: 0, dishesBlocked: 0, refusedOrders: refused.orders, lostRevenue: roundMoney(refused.lost), ongoing: false });
+    }
+  }
+
+  const all = [...byProduct.values()];
+  return {
+    days,
+    ingredients: all.sort((a, b) => b.hours - a.hours || b.refusedOrders - a.refusedOrders || a.productName.localeCompare(b.productName, 'ru')).slice(0, SHORTAGES_LIMIT),
+    totals: {
+      episodes: all.reduce((sum, i) => sum + i.episodes, 0),
+      hours: Math.round(all.reduce((sum, i) => sum + i.hours, 0) * 10) / 10,
+      refusedOrders: Number(refusalTotals.rows[0]?.orders ?? 0),
+      lostRevenue: roundMoney(Number(refusalTotals.rows[0]?.lost ?? 0)),
+    },
   };
 }
 
