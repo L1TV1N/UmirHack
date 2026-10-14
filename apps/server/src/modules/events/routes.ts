@@ -54,7 +54,7 @@ export const eventRoutes =
       const send = (event: LiveEvent) => {
         res.write(`event: ${event.type}\ndata: ${JSON.stringify({ at: event.at })}\n\n`);
       };
-      const unsubscribe = hub.subscribe(send);
+      const unsubscribe = hub.subscribe(send, principal.orgId);
       const ping = setInterval(() => res.write(': ping\n\n'), PING_MS);
       const life = setTimeout(() => finish(res), MAX_LIFE_MS * (0.9 + Math.random() * 0.1));
       ping.unref();

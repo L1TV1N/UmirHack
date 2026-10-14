@@ -40,6 +40,8 @@ describe('таблица маршрутов', () => {
       'GET /api/health/ready',
       'GET /api/supplier-gateway/orders/:id',
       'GET /api/supplier-portal/link',
+      'POST /api/auth/2fa/resend',
+      'POST /api/auth/2fa/verify',
       'POST /api/auth/login',
       'POST /api/auth/logout',
       'POST /api/auth/refresh',

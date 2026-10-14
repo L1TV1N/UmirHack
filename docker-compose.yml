@@ -177,6 +177,22 @@ services:
       BUSINESS_TZ: ${BUSINESS_TZ:-Europe/Moscow}
     command: ["node", "apps/server/dist/create-admin-cli.js"]
 
+  # Сброс подтверждения входа администратору, потерявшему Telegram и резервные коды.
+  # Запуск: docker compose --profile admin run --rm reset-2fa admin@example.ru
+  reset-2fa:
+    build: .
+    profiles: ["admin"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://zapas_app:${DB_APP_PASSWORD}@db:5432/zapas
+      MIGRATION_DATABASE_URL: postgres://zapas_owner:${DB_OWNER_PASSWORD}@db:5432/zapas
+      JWT_SECRET: ${JWT_SECRET:?Задайте JWT_SECRET в .env}
+      BUSINESS_TZ: ${BUSINESS_TZ:-Europe/Moscow}
+    entrypoint: ["node", "apps/server/dist/two-factor-reset-cli.js"]
+
 volumes:
   pgdata:
   supplier-data:

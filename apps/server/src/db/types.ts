@@ -13,6 +13,8 @@ export interface UsersTable {
   id: Generated<string>;
   org_id: Generated<string>;
   must_change_password: Generated<boolean>;
+  two_factor_enabled: Generated<boolean>;
+  two_factor_enabled_at: TimestampNullable;
   email: string;
   full_name: string;
   password_hash: string;
@@ -24,6 +26,28 @@ export interface UsersTable {
   last_login_at: TimestampNullable;
   created_at: Timestamp;
   updated_at: Timestamp;
+}
+
+export interface LoginChallengesTable {
+  id: Generated<string>;
+  user_id: string;
+  purpose: 'login' | 'enable' | 'disable' | 'recovery';
+  code_hash: string;
+  attempts: Generated<number>;
+  sends: Generated<number>;
+  delivered: Generated<boolean>;
+  ip: string | null;
+  created_at: Timestamp;
+  last_sent_at: Timestamp;
+  expires_at: Timestamp;
+  consumed_at: TimestampNullable;
+}
+
+export interface RecoveryCodesTable {
+  user_id: string;
+  code_hash: string;
+  created_at: Timestamp;
+  used_at: TimestampNullable;
 }
 
 export interface TelegramLinksTable {
@@ -617,6 +641,8 @@ export interface Database {
   pos_inbox: PosInboxTable;
   pos_code_map: PosCodeMapTable;
   users: UsersTable;
+  login_challenges: LoginChallengesTable;
+  recovery_codes: RecoveryCodesTable;
   locations: LocationsTable;
   user_locations: UserLocationsTable;
   supplier_item_map: SupplierItemMapTable;

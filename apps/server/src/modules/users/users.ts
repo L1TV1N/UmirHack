@@ -20,6 +20,7 @@ export function toUserDto(row: UserRow, locationIds: string[], now: Date = new D
     organizationId: row.org_id,
     organizationName,
     mustChangePassword: row.must_change_password,
+    twoFactorEnabled: row.two_factor_enabled,
   };
 }
 

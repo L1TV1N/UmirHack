@@ -1,4 +1,4 @@
-import type { Role } from '@zapas/shared';
+import type { Role, TwoFactorStatusDto } from '@zapas/shared';
 import { ROLE_LABELS } from '@zapas/shared';
 import {
   Boxes,
@@ -43,6 +43,7 @@ import { TeamBanner } from '../TeamBanner/TeamBanner';
 import { useLiveUpdates } from '../../lib/useLiveUpdates';
 import { ChangePasswordDialog } from './ChangePasswordDialog';
 import { OfflineStatus } from './OfflineStatus';
+import { SecurityDialog } from './SecurityDialog';
 import { TelegramDialog } from './TelegramDialog';
 import { BrandMark } from './Brand';
 import { Select } from '../Controls/Controls';
@@ -107,6 +108,8 @@ function UserMenu() {
   const [open, setOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [telegramOpen, setTelegramOpen] = useState(false);
+  const [securityOpen, setSecurityOpen] = useState(false);
+  const twoFactor = useGet<TwoFactorStatusDto>('/auth/2fa', undefined, { enabled: user?.role === 'admin', staleTime: 60_000 });
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -192,6 +195,21 @@ function UserMenu() {
             <Send size={16} />
             Telegram
           </button>
+          {user?.role === 'admin' && (
+            <button
+              type="button"
+              role="menuitem"
+              className={styles.menuItem}
+              onClick={() => {
+                setOpen(false);
+                setSecurityOpen(true);
+              }}
+            >
+              <ShieldCheck size={16} />
+              Безопасность
+              {twoFactor.data && twoFactor.data.eligible && !twoFactor.data.enabled && <span aria-label="защита не включена" title="Подтверждение входа не включено" style={{ marginLeft: 'auto', width: 8, height: 8, borderRadius: '50%', background: 'var(--warn-500, #e08a1e)' }} />}
+            </button>
+          )}
           <button type="button" role="menuitem" className={styles.menuItem} onClick={() => void logout()}>
             <LogOut size={16} />
             Выйти
@@ -200,6 +218,7 @@ function UserMenu() {
       )}
       <ChangePasswordDialog open={passwordOpen} onClose={() => setPasswordOpen(false)} />
       <TelegramDialog open={telegramOpen} onClose={() => setTelegramOpen(false)} />
+      <SecurityDialog open={securityOpen} onClose={() => setSecurityOpen(false)} />
     </div>
   );
 }

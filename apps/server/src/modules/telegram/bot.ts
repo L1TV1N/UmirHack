@@ -3,6 +3,8 @@ import type { Deps } from '../../lib/context';
 import { executeAction, parseAction, prepareAction } from './actions';
 import type { Buttons, TelegramApi, TelegramCallbackQuery, TelegramMessage, TelegramUpdate } from './api';
 import { BUTTON_COMMANDS, greeting, HELP_TEXT, MAIN_MENU, MENU_COMMANDS, parseCommand, runCommand, type CommandContext } from './commands';
+import { writeAudit } from '../audit/audit';
+import { denyChallenge } from '../auth/two-factor';
 import { isTopic, subscriptionsView, toggleTopic } from './subscriptions';
 import { BOT_META, consumeLinkCode, normalizeCode, principalOfChat, unlink } from './links';
 
@@ -12,6 +14,7 @@ const RATE_MAX = 30;
 const LINK_FAIL_MAX = 5;
 const LINK_LOCK_MS = 15 * 60_000;
 const TEXT_MAX = 300;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const CLOSED = [
   'Это закрытый бот системы «Запас». Данные видны только сотрудникам.',
@@ -124,6 +127,19 @@ export class TelegramBot {
         const out = await runCommand(ctx, { name: rest, args: '' });
         if (out) await this.reply(chatId, out.text, out.buttons);
         await answer();
+      } else if (head === '2fa-no' && UUID_RE.test(rest)) {
+        const denied = await denyChallenge(this.deps, rest, chatId);
+        if (denied.ok) {
+          await writeAudit(this.deps.db, { action: 'auth.2fa_denied', entity: 'user', ...(denied.userId ? { entityId: denied.userId } : {}), ...(denied.email ? { email: denied.email } : {}), details: {}, meta: BOT_META, at: this.deps.clock() });
+        }
+        await this.replace(
+          chatId,
+          messageId,
+          denied.ok
+            ? 'Вход отклонён. Запись заблокирована на 15 минут, все сессии закрыты. Смените пароль и сообщите администратору.'
+            : 'Запрос уже недействителен.',
+        );
+        await answer(denied.ok ? 'Отклонено' : undefined);
       } else if (head === 'sub' && isTopic(rest)) {
         const view = subscriptionsView(await toggleTopic(this.deps.db, known.row.id, rest));
         await this.replace(chatId, messageId, view.text, view.buttons);
@@ -198,8 +214,13 @@ export class TelegramBot {
       const ctx: CommandContext = { deps: this.deps, principal: known.principal, user: known.row };
 
       if (cmd.name === 'unlink') {
-        await unlink(this.deps, known.row.id, known.principal, BOT_META);
-        await this.reply(chatId, 'Чат отвязан. Чтобы подключить снова, получите новый код в веб-интерфейсе.');
+        const outcome = await unlink(this.deps, known.row.id, known.principal, BOT_META);
+        await this.reply(
+          chatId,
+          outcome === 'two_factor'
+            ? 'Чат служит вторым фактором входа, поэтому отвязать его нельзя. Сначала отключите подтверждение входа в веб-интерфейсе.'
+            : 'Чат отвязан. Чтобы подключить снова, получите новый код в веб-интерфейсе.',
+        );
         return;
       }
       const out = await runCommand(ctx, cmd);
@@ -242,6 +263,8 @@ export class TelegramBot {
           chatId,
           result.reason === 'inactive'
             ? 'Учётная запись отключена.'
+            : result.reason === 'two_factor'
+              ? 'Этот чат служит вторым фактором входа: подменить его нельзя. Сначала отключите подтверждение входа в веб-интерфейсе.'
             : result.reason === 'chat_taken'
               ? 'Этот чат уже привязан к другой учётной записи. Сначала отправьте /unlink из неё или обратитесь к администратору.'
               : 'Код не подошёл: он неверный, уже использован или истёк (действует 10 минут). Получите новый в веб-интерфейсе.',

@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "create-admin": "tsx src/db/create-admin-cli.ts",
+    "2fa:reset": "tsx src/db/two-factor-reset-cli.ts",
     "barcodes": "tsx src/db/seed/barcodes-cli.ts",
     "seed:platform": "tsx src/db/seed/platform-cli.ts",
     "portal:sync": "tsx src/modules/supplier-portal/sync-cli.ts",

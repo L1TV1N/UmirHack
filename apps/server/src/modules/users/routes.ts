@@ -18,6 +18,7 @@ import { orgOf } from '../../lib/scope';
 import { dropTelegramAccess } from '../telegram/links';
 import { writeAudit } from '../audit/audit';
 import { generatePassword, hashPassword } from '../auth/password';
+import { clearTwoFactor, notifyUser } from '../auth/two-factor';
 import { loadLocationIds, toUserDto, type UserRow } from './users';
 
 export const userRoutes =
@@ -185,6 +186,25 @@ export const userRoutes =
       return toDto(row);
     });
 
+    // Администратор сбрасывает подтверждение входа коллеге, который потерял доступ к Telegram и резервным кодам.
+    // Себе защиту выключают через подтверждение, а не через сброс.
+    app.post('/users/:id/two-factor/reset', { config: asUser('admin'), schema: { params: idParam } }, async (req, reply) => {
+      const principal = requireUser(req);
+      if (req.params.id === principal.id) throw badRequest('Свою защиту отключите через подтверждение в профиле', undefined, 'use_disable');
+      const now = deps.clock();
+      const target = await db.selectFrom('users').select(['id', 'email', 'two_factor_enabled']).where('id', '=', req.params.id).where('org_id', '=', orgOf(principal)).executeTakeFirst();
+      if (!target) throw notFound('Пользователь');
+      if (!target.two_factor_enabled) throw conflict('У пользователя подтверждение входа не включено', undefined, 'not_enabled');
+      await db.transaction().execute(async (trx) => {
+        await clearTwoFactor(trx, target.id, now);
+        // сессии закрываем: после сброса человек заходит заново и сам решает, включать ли защиту снова
+        await trx.updateTable('refresh_tokens').set({ revoked_at: now }).where('user_id', '=', target.id).where('revoked_at', 'is', null).execute();
+        await writeAudit(trx, { action: '2fa.reset', entity: 'user', entityId: target.id, principal, meta: req.meta, at: now, details: {} });
+      });
+      await notifyUser(deps, target.id, 'Администратор сбросил подтверждение входа для вашей записи. Включите его заново в профиле.');
+      return reply.status(204).send();
+    });
+
     app.put(
       '/users/:id/password',
       { config: asUser('admin'), schema: { params: idParam, body: setPasswordBody } },
@@ -209,7 +229,7 @@ export const userRoutes =
             .where('revoked_at', 'is', null)
             .execute();
           // чат Telegram тоже доступ к данным: после сброса пароля его нужно привязать заново
-          await dropTelegramAccess(trx, target.id);
+          await dropTelegramAccess(trx, target.id, { keepForTwoFactor: true });
           await writeAudit(trx, {
             action: 'user.password_set',
             entity: 'user',

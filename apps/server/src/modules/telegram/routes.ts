@@ -35,6 +35,8 @@ export const telegramRoutes =
     app.post('/telegram/link-code', { config: { ...asUser(), rateLimit: { max: deps.config.loginRateLimitMax, timeWindow: '1 minute' } } }, async (req, reply): Promise<TelegramLinkCodeDto> => {
       const principal = requireUser(req);
       if (!deps.telegram) throw conflict('Бот Telegram не настроен администратором', undefined, 'telegram_not_configured');
+      const owner = await deps.db.selectFrom('users').select('two_factor_enabled').where('id', '=', principal.id).executeTakeFirst();
+      if (owner?.two_factor_enabled) throw conflict('Чат служит вторым фактором входа. Чтобы сменить его, сначала отключите подтверждение входа.', undefined, 'two_factor_enabled');
       const { code, expiresAt } = await createLinkCode(deps, principal.id);
       const bot = await botName();
       void reply.status(201);
@@ -43,7 +45,8 @@ export const telegramRoutes =
 
     app.delete('/telegram/link', { config: asUser() }, async (req, reply) => {
       const principal = requireUser(req);
-      await unlink(deps, principal.id, principal, req.meta);
+      const outcome = await unlink(deps, principal.id, principal, req.meta);
+      if (outcome === 'two_factor') throw conflict('Чат служит вторым фактором входа. Сначала отключите подтверждение входа.', undefined, 'two_factor_enabled');
       return reply.status(204).send();
     });
   };

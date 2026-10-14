@@ -1,4 +1,4 @@
-import { hasRole, type RegisterBody, type Role, type SessionDto, type UserDto } from '@zapas/shared';
+import { hasRole, type RegisterBody, type Role, type SessionDto, type TwoFactorChallengeDto, type UserDto } from '@zapas/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, refreshSession, session } from '../api/client';
@@ -12,7 +12,12 @@ interface AuthValue {
   user: UserDto | null;
   /** Сессия оборвалась сама (истекла или закрыта администратором), а не по кнопке «Выйти». */
   sessionEnded: boolean;
-  login(email: string, password: string): Promise<void>;
+  /** Вход по паролю. Если у администратора включено подтверждение, сессии ещё нет: возвращается запрос кода. */
+  login(email: string, password: string): Promise<TwoFactorChallengeDto | null>;
+  /** Второй шаг входа: код из Telegram или резервный код. */
+  verifyTwoFactor(challengeId: string, code: string): Promise<void>;
+  /** Новый код для входа; возвращает обновлённый запрос. */
+  resendTwoFactor(challengeId: string): Promise<{ challengeId: string; delivered: boolean; expiresIn: number; resendAfter: number }>;
   /** Новая организация и её первый администратор. */
   register(body: RegisterBody): Promise<void>;
   logout(): Promise<void>;
@@ -104,11 +109,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [apply]);
 
   const login = useCallback(
-    async (email: string, password: string) => {
-      const s = await api<SessionDto>('POST', '/auth/login', { body: { email, password }, auth: false });
+    async (email: string, password: string): Promise<TwoFactorChallengeDto | null> => {
+      const res = await api<SessionDto | TwoFactorChallengeDto>('POST', '/auth/login', { body: { email, password }, auth: false });
+      if ('twoFactorRequired' in res) return res;
+      apply(res);
+      return null;
+    },
+    [apply],
+  );
+
+  const verifyTwoFactor = useCallback(
+    async (challengeId: string, code: string) => {
+      const s = await api<SessionDto>('POST', '/auth/2fa/verify', { body: { challengeId, code }, auth: false });
       apply(s);
     },
     [apply],
+  );
+
+  const resendTwoFactor = useCallback(
+    (challengeId: string) => api<{ challengeId: string; delivered: boolean; expiresIn: number; resendAfter: number }>('POST', '/auth/2fa/resend', { body: { challengeId }, auth: false }),
+    [],
   );
 
   const register = useCallback(
@@ -132,8 +152,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [apply]);
 
   const value = useMemo<AuthValue>(
-    () => ({ status, user, sessionEnded, login, register, logout, can: (role) => (user ? hasRole(user.role, role) : false) }),
-    [status, user, sessionEnded, login, register, logout],
+    () => ({ status, user, sessionEnded, login, verifyTwoFactor, resendTwoFactor, register, logout, can: (role) => (user ? hasRole(user.role, role) : false) }),
+    [status, user, sessionEnded, login, verifyTwoFactor, resendTwoFactor, register, logout],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

@@ -3,6 +3,7 @@ import { PageHeader } from '../../components/Panel/Panel';
 import { Tabs } from '../../components/Tabs/Tabs';
 import { useUrlState } from '../../lib/useUrlState';
 import { AuditPanel } from './AuditPanel';
+import { CachePanel } from './CachePanel';
 import { ExchangePanel } from './ExchangePanel';
 import { ForecastPanel } from './ForecastPanel';
 import { IntegrationsPanel } from './IntegrationsPanel';
@@ -11,8 +12,8 @@ import { PosPanel } from './PosPanel';
 import { SettingsPanel } from './SettingsPanel';
 import { UsersPanel } from './UsersPanel';
 
-type Tab = 'users' | 'locations' | 'settings' | 'forecast' | 'keys' | 'exchange' | 'integrations' | 'audit';
-const TABS: Tab[] = ['users', 'locations', 'settings', 'forecast', 'keys', 'exchange', 'integrations', 'audit'];
+type Tab = 'users' | 'locations' | 'settings' | 'forecast' | 'keys' | 'exchange' | 'integrations' | 'audit' | 'cache';
+const TABS: Tab[] = ['users', 'locations', 'settings', 'forecast', 'keys', 'exchange', 'integrations', 'audit', 'cache'];
 
 export default function AdminPage() {
   const [url, setUrl] = useUrlState({ tab: 'users' });
@@ -38,6 +39,7 @@ export default function AdminPage() {
           { value: 'exchange', label: 'Учётные системы' },
           { value: 'integrations', label: 'Интеграции' },
           { value: 'audit', label: 'Журнал аудита' },
+          { value: 'cache', label: 'Кеш' },
         ]}
       />
       {tab === 'users' && <UsersPanel />}
@@ -48,6 +50,7 @@ export default function AdminPage() {
       {tab === 'exchange' && <ExchangePanel />}
       {tab === 'integrations' && <IntegrationsPanel />}
       {tab === 'audit' && <AuditPanel />}
+      {tab === 'cache' && <CachePanel />}
     </>
   );
 }

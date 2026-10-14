@@ -8,6 +8,7 @@ export default defineConfig({
     'seed-cli': 'src/db/seed/cli.ts',
     'seed-platform-cli': 'src/db/seed/platform-cli.ts',
     'create-admin-cli': 'src/db/create-admin-cli.ts',
+    'two-factor-reset-cli': 'src/db/two-factor-reset-cli.ts',
     'portal-sync-cli': 'src/modules/supplier-portal/sync-cli.ts',
     'emulate-cli': 'src/emulator/cli.ts',
     'emulate-pos-cli': 'src/emulator/pos-cli.ts',

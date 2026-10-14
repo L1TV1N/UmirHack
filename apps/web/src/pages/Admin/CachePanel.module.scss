@@ -1,0 +1,51 @@
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  padding: 16px;
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-0);
+
+  span {
+    color: var(--ink-500);
+    font-size: 12px;
+  }
+
+  strong {
+    font-size: 22px;
+    letter-spacing: -0.02em;
+  }
+
+  small {
+    color: var(--ink-500);
+    font-size: 12px;
+  }
+}
+
+.good strong {
+  color: var(--ok-700);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px 0;
+  font-weight: 700;
+}
+
+.note {
+  margin: 0;
+  padding: 0 16px 16px;
+  color: var(--ink-600);
+  line-height: 1.5;
+  font-size: 13px;
+}

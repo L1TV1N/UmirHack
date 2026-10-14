@@ -228,6 +228,7 @@ export async function getDashboard(deps: Deps, principal: Principal, requestedLo
   const from = addDays(today, -(TREND_DAYS - 1));
   const scopeSql = scopeIds ? sql`AND location_id IN (${inList(scopeIds.length ? scopeIds : ['00000000-0000-0000-0000-000000000000'])})` : sql``;
 
+  const owners = principal.orgId ? [principal.orgId] : undefined;
   const { losses, revenue } = await cachedAggregate(deps, `dashboard|${scopeKey(scopeIds)}`, async () => {
     const lossRows = await sql<{ day: string; reason: WriteoffReason; value: string }>`
       SELECT (created_at AT TIME ZONE ${tz})::date::text AS day, reason, SUM(-quantity * unit_cost) AS value
@@ -244,7 +245,7 @@ export async function getDashboard(deps: Deps, principal: Principal, requestedLo
         AND (created_at AT TIME ZONE ${tz})::date >= ${from}::date
         ${scopeSql}`.execute(deps.db);
     return { losses: lossRows.rows, revenue: Number(revenueRow.rows[0]?.value ?? 0) };
-  });
+  }, owners);
 
   const trendByDay = new Map<string, WriteoffTrendPoint>();
   for (let i = 0; i < TREND_DAYS; i += 1) {

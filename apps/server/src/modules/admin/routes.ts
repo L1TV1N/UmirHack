@@ -5,6 +5,8 @@ import {
   settingsBody,
   type ApiKeyCreatedDto,
   type ApiKeyDto,
+  type CacheStatsDto,
+  type CacheStatusDto,
   type SettingsDto,
 } from '@zapas/shared';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
@@ -14,6 +16,10 @@ import { conflict, notFound } from '../../lib/errors';
 import { orgOf } from '../../lib/scope';
 import { asUser, requireUser } from '../../plugins/access';
 import { listAudit, verifyAuditChain, writeAudit } from '../audit/audit';
+import { hubFor } from '../../lib/events';
+import type { CacheStats } from '../../lib/snapshot-cache';
+import { cacheStats, invalidateSnapshots } from '../analytics/snapshot';
+import { clusterFor } from '../cluster/sync';
 import { sendDigest } from '../notifications/digest';
 import { getSettings, saveSettings } from '../settings/settings';
 import { runSelfCheck } from './selfcheck';
@@ -52,6 +58,56 @@ export const adminRoutes =
     });
 
     app.get('/audit/verify', { config: asUser('admin') }, async () => verifyAuditChain(db));
+
+    const statsDto = (s: CacheStats): CacheStatsDto => {
+      const lookups = s.hits + s.misses + s.joined + s.stale;
+      return {
+        hits: s.hits,
+        misses: s.misses,
+        joined: s.joined,
+        stale: s.stale,
+        failures: s.failures,
+        invalidations: s.invalidations,
+        taggedInvalidations: s.taggedInvalidations,
+        loads: s.loads,
+        lastLoadMs: Math.round(s.lastLoadMs),
+        avgLoadMs: Math.round(s.avgLoadMs * 10) / 10,
+        maxLoadMs: Math.round(s.maxLoadMs),
+        entries: s.entries,
+        maxEntries: s.maxEntries,
+        ttlSeconds: Math.round(s.ttlMs / 1000),
+        heavyMs: s.heavyMs,
+        hitRatio: lookups > 0 ? Math.round(((lookups - s.misses) / lookups) * 1000) / 1000 : 0,
+      };
+    };
+
+    // Только счётчики: ключи кеша содержат идентификаторы точек всех организаций и наружу не отдаются
+    app.get('/admin/cache', { config: asUser('admin') }, async (): Promise<CacheStatusDto> => {
+      const stats = cacheStats(db);
+      const cluster = clusterFor(db)?.status();
+      return {
+        snapshots: statsDto(stats.snapshots),
+        aggregates: statsDto(stats.aggregates),
+        liveClients: hubFor(db).size,
+        cluster: {
+          enabled: cluster?.enabled ?? false,
+          connected: cluster?.connected ?? false,
+          sent: cluster?.sent ?? 0,
+          received: cluster?.received ?? 0,
+          sendErrors: cluster?.sendErrors ?? 0,
+          reconnects: cluster?.reconnects ?? 0,
+          lastError: cluster?.lastError ?? null,
+        },
+      };
+    });
+
+    /** Принудительный сброс кеша своей организации. Нужен после правок в базе мимо приложения. */
+    app.post('/admin/cache/flush', { config: asUser('admin') }, async (req, reply) => {
+      const principal = requireUser(req);
+      invalidateSnapshots(db, orgOf(principal));
+      await writeAudit(db, { action: 'cache.flush', entity: 'cache', principal, meta: req.meta, at: deps.clock(), details: {} });
+      return reply.status(204).send();
+    });
 
     app.post('/notifications/test', { config: asUser('admin') }, async (req, reply) => {
       if (!deps.notifier.enabled) {

@@ -1,7 +1,7 @@
 import { addDays, daysBetween, toMilli, type SettingsBody } from '@zapas/shared';
 import type { Db } from '../../db/client';
 import { hubFor } from '../../lib/events';
-import { SnapshotCache } from '../../lib/snapshot-cache';
+import { SnapshotCache, UNKNOWN_OWNER, type CacheStats } from '../../lib/snapshot-cache';
 import { sql } from 'kysely';
 import { observedDays, velocityFromWeightedSum } from '../../domain/forecast';
 import type { RecBatch, RecDish, RecLocation, RecProduct, RecVelocity } from '../../domain/recommendations';
@@ -272,10 +272,18 @@ export function restrictSnapshot(snap: Snapshot, ids: string[] | null): Snapshot
 
 const caches = new WeakMap<Db, SnapshotCache<Snapshot>>();
 
+/** Чьи данные в срезе: по точкам, у которых есть организация. Точка без организации помечает срез «неизвестно чей». */
+function ownersOf(snap: Snapshot): string[] {
+  const owners = new Set<string>();
+  for (const loc of snap.locations.values()) owners.add(loc.orgId ?? UNKNOWN_OWNER);
+  // срез без точек ничей: его сбрасывает запись любой организации (например, появление первой точки)
+  return owners.size > 0 ? [...owners] : [UNKNOWN_OWNER];
+}
+
 function cacheFor(db: Db): SnapshotCache<Snapshot> {
   let c = caches.get(db);
   if (!c) {
-    c = new SnapshotCache<Snapshot>({ ttlMs: 20_000, heavyMs: 250, maxEntries: 8 });
+    c = new SnapshotCache<Snapshot>({ ttlMs: 20_000, heavyMs: 250, maxEntries: 8, tagsOf: ownersOf });
     caches.set(db, c);
   }
   return c;
@@ -283,24 +291,43 @@ function cacheFor(db: Db): SnapshotCache<Snapshot> {
 
 const aggregates = new WeakMap<Db, SnapshotCache<unknown>>();
 
+function aggregatesFor(db: Db): SnapshotCache<unknown> {
+  let c = aggregates.get(db);
+  if (!c) {
+    c = new SnapshotCache<unknown>({ ttlMs: 20_000, heavyMs: Number.POSITIVE_INFINITY, maxEntries: 32 });
+    aggregates.set(db, c);
+  }
+  return c;
+}
+
 /**
  * Небольшие запросы-агрегаты панели (потери и выручка за 30 дней). Параллельные запросы делят один расчёт,
  * а любая запись сбрасывает его так же, как срез: после операции человек видит свежие цифры.
+ * owners: чьи данные считаются, по ним работает сброс одной организации.
  */
-export function cachedAggregate<T>(deps: Deps, key: string, load: () => Promise<T>): Promise<T> {
-  let c = aggregates.get(deps.db);
-  if (!c) {
-    c = new SnapshotCache<unknown>({ ttlMs: 20_000, heavyMs: Number.POSITIVE_INFINITY, maxEntries: 32 });
-    aggregates.set(deps.db, c);
-  }
-  return c.get(`${businessToday(deps)}|${key}`, load) as Promise<T>;
+export function cachedAggregate<T>(deps: Deps, key: string, load: () => Promise<T>, owners?: readonly string[]): Promise<T> {
+  return aggregatesFor(deps.db).get(`${businessToday(deps)}|${key}`, load as () => Promise<unknown>, false, owners) as Promise<T>;
 }
 
-/** Любая запись, которая могла изменить остатки, цены, рецептуры или настройки. */
-export function invalidateSnapshots(db: Db): void {
-  cacheFor(db).invalidate();
-  aggregates.get(db)?.invalidate();
-  hubFor(db).publish();
+/**
+ * Любая запись, которая могла изменить остатки, цены, рецептуры или настройки.
+ * org: организация-автор записи, тогда срезы остальных организаций остаются. Без неё сбрасывается всё.
+ * Другие экземпляры приложения узнают об этом через хаб событий (LISTEN/NOTIFY), если он подключён.
+ */
+export function invalidateSnapshots(db: Db, org: string | null = null): void {
+  invalidateLocal(db, org);
+  hubFor(db).publish(org, { cache: true });
+}
+
+/** То же, но только в памяти этого процесса: так обрабатывается сигнал другого экземпляра. */
+export function invalidateLocal(db: Db, org: string | null = null): void {
+  cacheFor(db).invalidate(org);
+  aggregates.get(db)?.invalidate(org);
+}
+
+/** Счётчики обоих кешей для страницы администратора. */
+export function cacheStats(db: Db): { snapshots: CacheStats; aggregates: CacheStats } {
+  return { snapshots: cacheFor(db).stats(), aggregates: aggregatesFor(db).stats() };
 }
 
 /**

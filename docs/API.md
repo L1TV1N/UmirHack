@@ -27,6 +27,8 @@
 
 **Количества и деньги** передаются числами: количества до трёх знаков, деньги до двух. Даты без времени это `YYYY-MM-DD`, моменты времени в ISO 8601.
 
+**Заголовки кеша.** Ответы, в которых участвовал серверный кеш расчётов, содержат `X-Cache: HIT | MISS | JOINED | STALE` и `Server-Timing: cache;desc="…";dur=…`. Остальные ответы идут с `Cache-Control: no-store`. Подробнее: [CACHING.md](CACHING.md).
+
 **Идемпотентность.** Операции, создающие документы, принимают заголовок `Idempotency-Key` (8–128 символов: буквы, цифры, `. _ : -`). Повтор с тем же ключом от того же пользователя возвращает уже созданный документ со статусом 200 и `"duplicate": true`, остатки второй раз не меняются. Тот же ключ с другим телом запроса это ошибка 422 с кодом `idempotency_conflict`: ключ нужно сменить, а не повторять.
 
 ## Вход
@@ -38,12 +40,23 @@ POST /api/auth/login
 
 Ответ: `{ "accessToken": "…", "expiresIn": 900, "user": { … } }`, плюс cookie обновления. Неверный пароль, неизвестный адрес и блокировка дают одинаковый ответ 401 `invalid_credentials`.
 
+**Подтверждение входа администратора.** Если у администратора включено подтверждение, после верного пароля вместо сессии приходит запрос кода, токена и cookie в нём нет:
+
+```json
+{ "twoFactorRequired": true, "challengeId": "…", "delivered": true, "expiresIn": 300, "resendAfter": 30 }
+```
+
+`delivered: false` значит, что код в Telegram отправить не удалось: остаётся резервный код. Вход завершает `POST /auth/2fa/verify` с телом `{ "challengeId", "code" }`, код шесть цифр из Telegram или резервный (регистр, пробелы и дефис не важны). Ответ как у входа: токен и cookie. Ошибки 401: `invalid_code` (в сообщении остаток попыток), `invalid_challenge` (запрос устарел, закрыт или запись заблокирована), `challenge_exhausted` (пять неверных кодов). `POST /auth/2fa/resend` с `{ "challengeId" }` отправляет код ещё раз: 429 `resend_too_soon` раньше, чем через 30 секунд, 429 `resend_limit` после трёх отправок.
+
 | Метод и адрес | Назначение |
 |---|---|
 | `POST /auth/refresh` | новый токен по cookie, cookie ротируется |
 | `POST /auth/logout` | закрыть сессию |
 | `GET /auth/me` | текущий пользователь |
 | `POST /auth/register` | `{ organizationName, fullName, email, password }`: новая организация и её администратор, сразу открывает сессию (201). 409 `duplicate_email` |
+| `GET /auth/2fa` | любой вошедший: `{ eligible, botConfigured, telegramLinked, enabled, enabledAt, recoveryCodesLeft }` |
+| `POST /auth/2fa/start` | администратор: `{ purpose: enable \| disable \| recovery, password? }`, код уходит в Telegram, ответ `{ challengeId, delivered, expiresIn, resendAfter }`. Для `disable` и `recovery` нужен пароль. 409 `telegram_not_linked`, `telegram_not_configured`, `already_enabled`, `not_enabled`; 502 `telegram_unavailable` (включить нельзя, пока код не доставляется) |
+| `POST /auth/2fa/confirm` | администратор: `{ challengeId, code }`. Для `enable` и `recovery` в ответе `recoveryCodes` (восемь кодов, показываются один раз), для `disable` `{ enabled: false }` |
 | `POST /auth/change-password` | смена пароля, закрывает все сессии. Пока не сменён временный пароль, сервер отвечает 403 `password_change_required` на всё, кроме `/auth/me` и этого адреса |
 
 ## Операции
@@ -300,6 +313,9 @@ X-Api-Key: zk_…
 | `GET /settings` (все), `PUT /settings` | запись администратор. Помимо порогов: `useDemandModel` (поправка прогноза на день недели, праздники, погоду, акции) и `autoWriteoffExpired` (раз в сутки списывать просроченное от имени «Система») |
 | `GET/POST/DELETE /api-keys` | администратор |
 | `GET /audit`, `GET /audit/verify` | администратор |
+| `POST /users/:id/two-factor/reset` | администратор: сбросить подтверждение входа коллеге (204). Не себе (400 `use_disable`), чужая организация 404, не включено 409 |
+| `GET /admin/cache` | администратор: счётчики кеша расчётов (попадания, промахи, присоединения, прежние срезы, сбросы, длительность загрузок, число ключей), число клиентов живого обновления и состояние синхронизации экземпляров. Только числа, без ключей |
+| `POST /admin/cache/flush` | администратор: сбросить кеш своей организации (204), пишется в журнал |
 | `POST /notifications/test` | администратор |
 | `GET /health`, `GET /health/ready` | без входа |
 

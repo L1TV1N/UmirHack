@@ -16,6 +16,7 @@ import { TelegramBot } from './modules/telegram/bot';
 import { drainStopListSync } from './modules/stoplist/service';
 import { socksFetch } from './modules/telegram/proxy';
 import { HttpSupplierPortal } from './modules/supplier-portal/client';
+import { ClusterSync } from './modules/cluster/sync';
 
 loadEnvFile();
 const config = parseConfig();
@@ -26,13 +27,15 @@ const notifier = config.telegram
   : new NoopNotifier();
 
 const telegram = config.telegram?.commands ? new HttpTelegramApi(config.telegram.token, telegramFetch) : null;
+// коды подтверждения входа отправляются с любого экземпляра, даже если опрос Telegram ведёт другой
+const codeSender = telegram ?? (config.telegram ? new HttpTelegramApi(config.telegram.token, telegramFetch) : null);
 const invoiceReader = config.invoicePhoto ? new GigaChatInvoiceReader(config.invoicePhoto) : null;
 const webhookSender = new HttpWebhookSender({ allowPrivate: config.webhooks.allowPrivate });
 const exchangeTransport = new HttpExchangeTransport({ allowHosts: config.exchange.allowHosts });
 const mailer = config.smtp ? new SmtpMailer(config.smtp.url, config.smtp.from) : null;
 const weather = config.weatherEnabled ? new OpenMeteoProvider() : null;
 const supplierPortal = config.supplierPortal ? new HttpSupplierPortal(config.supplierPortal.url, config.supplierPortal.secret, config.supplierPortal.publicUrl) : null;
-const base = { db: handle.db, config, clock: () => new Date(), notifier, telegram, invoiceReader, webhookSender, exchangeTransport, mailer, weather, supplierPortal };
+const base = { db: handle.db, config, clock: () => new Date(), notifier, telegram, codeSender, invoiceReader, webhookSender, exchangeTransport, mailer, weather, supplierPortal };
 const app = await buildApp(base);
 const runtime = { ...base, log: app.log };
 const stopScheduler = config.scheduler ? startScheduler(runtime) : () => undefined;
@@ -40,6 +43,8 @@ const stopWebhooks = config.scheduler ? startWebhookWorker(runtime) : () => unde
 const stopExchange = config.scheduler ? startExchangeWorker(runtime) : () => undefined;
 const stopForecast = config.scheduler ? startForecastWorker(runtime) : () => undefined;
 const stopBot = telegram ? new TelegramBot(runtime, telegram).start() : async () => undefined;
+const cluster = config.clusterSync ? new ClusterSync(handle.db, config.databaseUrl, app.log) : null;
+await cluster?.start();
 
 let closing = false;
 async function shutdown(signal: string): Promise<void> {
@@ -54,6 +59,7 @@ async function shutdown(signal: string): Promise<void> {
     stopExchange();
     stopForecast();
     await stopBot();
+    await cluster?.stop();
     await app.close();
     await drainStopListSync(runtime);
     await handle.close();

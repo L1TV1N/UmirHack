@@ -20,6 +20,14 @@ const LABELS: Record<string, string> = {
   'auth.login_failed': 'Неудачный вход',
   'auth.locked': 'Блокировка учётной записи',
   'auth.logout': 'Выход',
+  'auth.2fa_challenge': 'Запрошен код подтверждения',
+  'auth.2fa_failed': 'Неверный код подтверждения',
+  'auth.2fa_denied': 'Вход отклонён кнопкой «Это не я»',
+  '2fa.enable': 'Включено подтверждение входа',
+  '2fa.disable': 'Отключено подтверждение входа',
+  '2fa.reset': 'Сброшено подтверждение входа',
+  '2fa.recovery_codes': 'Выпущены резервные коды',
+  'cache.flush': 'Сброшен кеш расчётов',
   'auth.password_changed': 'Смена пароля',
   'auth.refresh_reuse': 'Повторное использование токена',
   'document.receipt': 'Приход',
@@ -47,7 +55,7 @@ const LABELS: Record<string, string> = {
 };
 
 function tone(action: string) {
-  if (action.includes('failed') || action.includes('locked') || action.includes('reuse')) return 'danger' as const;
+  if (action.includes('failed') || action.includes('locked') || action.includes('reuse') || action.includes('denied')) return 'danger' as const;
   if (action.startsWith('document.') || action.startsWith('inventory.')) return 'info' as const;
   return 'neutral' as const;
 }

@@ -35,6 +35,7 @@ const schema = z.object({
   LOGIN_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(1000).default(10),
   ENABLE_DOCS: bool.default(false),
   SCHEDULER: bool.optional(),
+  CLUSTER_SYNC: bool.default(false),
   STOPLIST_SYNC_DELAY_MS: z.coerce.number().int().min(0).max(60_000).optional(),
 
   TELEGRAM_BOT_TOKEN: z.string().optional(),
@@ -90,6 +91,8 @@ export interface Config {
   loginRateLimitMax: number;
   enableDocs: boolean;
   scheduler: boolean;
+  /** Несколько экземпляров приложения: передавать сброс кеша и сигналы обновления через LISTEN/NOTIFY. */
+  clusterSync: boolean;
   /** Через сколько после операции пересчитывать стоп-лист. Частые операции склеиваются в один пересчёт. */
   stopListSyncDelayMs: number;
   /** commands: бот отвечает на команды (опрос Telegram). Выключается, если опрос ведёт другой экземпляр. */
@@ -196,6 +199,7 @@ export function parseConfig(source: NodeJS.ProcessEnv = process.env): Config {
     loginRateLimitMax: e.LOGIN_RATE_LIMIT_MAX,
     enableDocs: e.ENABLE_DOCS && !production,
     scheduler: e.SCHEDULER ?? e.NODE_ENV !== 'test',
+    clusterSync: e.CLUSTER_SYNC,
     stopListSyncDelayMs: e.STOPLIST_SYNC_DELAY_MS ?? (e.NODE_ENV === 'test' ? 0 : 1500),
     weatherEnabled: e.WEATHER_ENABLED,
     smtp: e.SMTP_URL && e.SMTP_FROM ? { url: e.SMTP_URL, from: e.SMTP_FROM } : null,

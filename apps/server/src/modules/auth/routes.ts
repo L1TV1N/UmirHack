@@ -1,4 +1,4 @@
-import { changePasswordBody, loginBody, registerBody } from '@zapas/shared';
+import { changePasswordBody, loginBody, registerBody, twoFactorResendBody, twoFactorVerifyBody } from '@zapas/shared';
 import type { FastifyReply } from 'fastify';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { Deps } from '../../lib/context';
@@ -6,7 +6,7 @@ import { unauthorized } from '../../lib/errors';
 import { asUser, open, requireUser } from '../../plugins/access';
 import { assertTrustedOrigin } from '../../plugins/security';
 import { loadUser, toUserDto } from '../users/users';
-import { changePassword, login, logout, refresh, register, type SessionResult } from './service';
+import { changePassword, completeTwoFactorLogin, login, logout, refresh, register, resendLoginCode, type SessionResult } from './service';
 
 export const REFRESH_COOKIE = 'zapas_rt';
 
@@ -34,7 +34,29 @@ export const authRoutes =
       async (req, reply) => {
         // без проверки источника чужая страница могла бы войти в систему под учётной записью злоумышленника
         assertTrustedOrigin(req, deps.config);
-        return respond(reply, await login(deps, req.body, req.meta));
+        const result = await login(deps, req.body, req.meta);
+        // нужен код из Telegram: сессии и cookie ещё нет
+        if ('twoFactor' in result) return result.twoFactor;
+        return respond(reply, result);
+      },
+    );
+
+    app.post(
+      '/auth/2fa/verify',
+      { config: { ...open, rateLimit: { max: deps.config.loginRateLimitMax, timeWindow: '1 minute' } }, schema: { body: twoFactorVerifyBody } },
+      async (req, reply) => {
+        assertTrustedOrigin(req, deps.config);
+        return respond(reply, await completeTwoFactorLogin(deps, req.body, req.meta));
+      },
+    );
+
+    app.post(
+      '/auth/2fa/resend',
+      { config: { ...open, rateLimit: { max: deps.config.loginRateLimitMax, timeWindow: '1 minute' } }, schema: { body: twoFactorResendBody } },
+      async (req) => {
+        assertTrustedOrigin(req, deps.config);
+        const issued = await resendLoginCode(deps, req.body.challengeId, req.meta);
+        return { challengeId: issued.id, delivered: issued.delivered, expiresIn: issued.expiresIn, resendAfter: issued.resendAfter };
       },
     );
 

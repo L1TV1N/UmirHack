@@ -38,6 +38,8 @@ export interface UserDto {
   organizationName: string | null;
   /** Пароль выдан администратором: нужно сменить его при первом входе. */
   mustChangePassword: boolean;
+  /** Вход с подтверждением кодом из Telegram включён (только у администраторов). */
+  twoFactorEnabled: boolean;
 }
 
 /** Ответ на создание пользователя: временный пароль виден только здесь и только один раз. */
@@ -639,4 +641,47 @@ export interface SelfCheckItemDto {
 export interface SelfCheckDto {
   checkedAt: string;
   items: SelfCheckItemDto[];
+}
+
+// Состояние кеша расчётов для страницы администратора
+
+export interface CacheStatsDto {
+  hits: number;
+  misses: number;
+  /** Присоединились к уже идущей загрузке: параллельные запросы делят одну. */
+  joined: number;
+  /** Отдан прежний срез, пока тяжёлый пересчитывается. */
+  stale: number;
+  failures: number;
+  invalidations: number;
+  /** Сбросы только одной организации (остальные срезы остались). */
+  taggedInvalidations: number;
+  loads: number;
+  lastLoadMs: number;
+  avgLoadMs: number;
+  maxLoadMs: number;
+  entries: number;
+  maxEntries: number;
+  ttlSeconds: number;
+  heavyMs: number;
+  /** Доля обращений, обошедшихся без собственной загрузки. */
+  hitRatio: number;
+}
+
+export interface ClusterStatusDto {
+  enabled: boolean;
+  connected: boolean;
+  sent: number;
+  received: number;
+  sendErrors: number;
+  reconnects: number;
+  lastError: string | null;
+}
+
+export interface CacheStatusDto {
+  snapshots: CacheStatsDto;
+  aggregates: CacheStatsDto;
+  /** Сколько клиентов сейчас слушают поток обновлений на этом экземпляре. */
+  liveClients: number;
+  cluster: ClusterStatusDto;
 }

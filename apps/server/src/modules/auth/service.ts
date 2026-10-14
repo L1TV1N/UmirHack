@@ -4,6 +4,8 @@ import {
   type LoginBody,
   type RegisterBody,
   type SessionDto,
+  type TwoFactorChallengeDto,
+  type TwoFactorVerifyBody,
 } from '@zapas/shared';
 import { sql, type Transaction } from 'kysely';
 import type { Db } from '../../db/client';
@@ -16,6 +18,7 @@ import { dropTelegramAccess } from '../telegram/links';
 import { writeAudit } from '../audit/audit';
 import { loadLocationIds, loadUser, toUserDto, type UserRow } from '../users/users';
 import { burnVerify, hashPassword, verifyPassword } from './password';
+import { checkChallenge, createChallenge, needsSecondFactor, notifyUser, resendChallenge } from './two-factor';
 import { signAccessToken } from './tokens';
 
 const MAX_FAILED_ATTEMPTS = 5;
@@ -31,7 +34,7 @@ export interface SessionResult {
 }
 
 /** Считает неудачную попытку и при необходимости блокирует запись. Возвращает true, если запись заблокирована. */
-async function registerFailure(deps: Deps, user: { id: string; email: string }, meta: RequestMeta, now: Date): Promise<boolean> {
+export async function registerFailure(deps: Deps, user: { id: string; email: string }, meta: RequestMeta, now: Date): Promise<boolean> {
   const updated = await deps.db
     .updateTable('users')
     .set({ failed_attempts: sql`failed_attempts + 1`, updated_at: now })
@@ -100,7 +103,12 @@ async function issueSession(
   };
 }
 
-export async function login(deps: Deps, body: LoginBody, meta: RequestMeta): Promise<SessionResult> {
+/** Пароль верен, но нужен второй фактор: сессии ещё нет. */
+export interface TwoFactorPending {
+  twoFactor: TwoFactorChallengeDto;
+}
+
+export async function login(deps: Deps, body: LoginBody, meta: RequestMeta): Promise<SessionResult | TwoFactorPending> {
   const { db } = deps;
   const now = deps.clock();
   const user = await db.selectFrom('users').selectAll().where(sql<boolean>`lower(email) = ${body.email}`).executeTakeFirst();
@@ -135,6 +143,14 @@ export async function login(deps: Deps, body: LoginBody, meta: RequestMeta): Pro
     return fail('bad_password');
   }
 
+  // Пароль верен, но до подтверждения кодом сессию не выдаём и счётчик неудач не сбрасываем:
+  // подбор кода считается теми же попытками, что и подбор пароля
+  if (needsSecondFactor(user)) {
+    const issued = await createChallenge(deps, user, 'login', meta.ip);
+    await writeAudit(db, { action: 'auth.2fa_challenge', entity: 'user', entityId: user.id, email: user.email, details: { delivered: issued.delivered }, meta, at: now });
+    return { twoFactor: { twoFactorRequired: true, challengeId: issued.id, delivered: issued.delivered, expiresIn: issued.expiresIn, resendAfter: issued.resendAfter } };
+  }
+
   const refreshed = await db
     .updateTable('users')
     .set({ failed_attempts: 0, locked_until: null, last_login_at: now })
@@ -153,6 +169,50 @@ export async function login(deps: Deps, body: LoginBody, meta: RequestMeta): Pro
     at: now,
   });
   return result;
+}
+
+/** Второй шаг входа: код из Telegram или резервный код. */
+export async function completeTwoFactorLogin(deps: Deps, body: TwoFactorVerifyBody, meta: RequestMeta): Promise<SessionResult> {
+  const { db } = deps;
+  const now = deps.clock();
+  const result = await checkChallenge(deps, body.challengeId, body.code, ['login']);
+
+  if (!result.ok) {
+    if (result.user) {
+      await registerFailure(deps, result.user, meta, now);
+      await writeAudit(db, { action: 'auth.2fa_failed', entity: 'user', entityId: result.user.id, email: result.user.email, details: { reason: result.reason }, meta, at: now });
+    }
+    if (result.reason === 'exhausted') throw unauthorized('Слишком много неверных кодов. Войдите заново.', 'challenge_exhausted');
+    if (result.reason === 'wrong') throw unauthorized(`Неверный код. Осталось попыток: ${result.attemptsLeft}`, 'invalid_code');
+    throw unauthorized('Запрос устарел или закрыт. Войдите заново.', 'invalid_challenge');
+  }
+
+  const refreshed = await db
+    .updateTable('users')
+    .set({ failed_attempts: 0, locked_until: null, last_login_at: now })
+    .where('id', '=', result.user.id)
+    .returningAll()
+    .executeTakeFirstOrThrow();
+  const locationIds = await loadLocationIds(db, refreshed.id);
+  const session = await issueSession(deps, db, refreshed, locationIds, crypto.randomUUID(), meta);
+  await writeAudit(db, {
+    action: 'auth.login',
+    entity: 'user',
+    entityId: refreshed.id,
+    email: refreshed.email,
+    details: { twoFactor: result.via },
+    meta,
+    at: now,
+  });
+  if (result.via === 'recovery') {
+    await notifyUser(deps, refreshed.id, `Вход в «Запас» по резервному коду. Осталось кодов: ${result.recoveryLeft}. Если это были не вы, смените пароль.`);
+  }
+  return session;
+}
+
+/** Повторная отправка кода для входа. */
+export async function resendLoginCode(deps: Deps, challengeId: string, meta: RequestMeta) {
+  return resendChallenge(deps, challengeId, meta.ip);
 }
 
 /** Новая организация и её первый администратор. Дальше он сам создаёт точки и приглашает сотрудников. */
@@ -328,7 +388,7 @@ export async function changePassword(
       .where('user_id', '=', row.id)
       .where('revoked_at', 'is', null)
       .execute();
-    await dropTelegramAccess(trx, row.id);
+    await dropTelegramAccess(trx, row.id, { keepForTwoFactor: true });
     await writeAudit(trx, {
       action: 'auth.password_changed',
       entity: 'user',

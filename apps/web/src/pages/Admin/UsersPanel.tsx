@@ -22,6 +22,7 @@ import { DataTable, type Column } from '../../components/DataTable/DataTable';
 import { Dialog } from '../../components/Dialog/Dialog';
 import { ErrorNote } from '../../components/Feedback/Feedback';
 import { Panel } from '../../components/Panel/Panel';
+import { useConfirm } from '../../components/Toast/Confirm';
 import { useToast } from '../../components/Toast/Toast';
 import { errorMessage } from '../../lib/errors';
 import { fmtDateTime } from '../../lib/format';
@@ -276,12 +277,25 @@ function PasswordDialog({ user, onClose, onSet }: { user: UserDto | null; onClos
 export function UsersPanel() {
   const { user: me } = useAuth();
   const toast = useToast();
+  const confirm = useConfirm();
   const users = useGet<Page<UserDto>>('/users', { limit: 200 });
   const locations = useGet<LocationDto[]>('/locations');
   const [editing, setEditing] = useState<UserDto | 'new' | null>(null);
   const [passwordFor, setPasswordFor] = useState<UserDto | null>(null);
   const [credentials, setCredentials] = useState<CreatedUserDto | null>(null);
   const unlock = useAction((id: string) => post(`/users/${id}/unlock`), ['/users']);
+  const resetTwoFactor = useAction((id: string) => post(`/users/${id}/two-factor/reset`), ['/users']);
+
+  const askReset = async (u: UserDto) => {
+    const ok = await confirm({
+      title: 'Сбросить подтверждение входа?',
+      message: `${u.fullName} сможет войти по одному паролю, его сессии закроются. Делайте это, только убедившись, что человек потерял и Telegram, и резервные коды. Действие попадёт в журнал.`,
+      confirmLabel: 'Сбросить',
+      danger: true,
+    });
+    if (!ok) return;
+    resetTwoFactor.mutate(u.id, { onSuccess: () => toast.success('Подтверждение входа сброшено'), onError: (err) => toast.error(errorMessage(err)) });
+  };
   const names = new Map((locations.data ?? []).map((l) => [l.id, l.name]));
 
   const columns: Column<UserDto>[] = [
@@ -297,7 +311,20 @@ export function UsersPanel() {
         </>
       ),
     },
-    { key: 'role', header: 'Роль', cell: (u) => <Chip tone={ROLE_TONE[u.role]}>{ROLE_LABELS[u.role]}</Chip> },
+    {
+      key: 'role',
+      header: 'Роль',
+      cell: (u) => (
+        <>
+          <Chip tone={ROLE_TONE[u.role]}>{ROLE_LABELS[u.role]}</Chip>
+          {u.role === 'admin' && (
+            <span className="muted" style={{ display: 'block', fontSize: 12, marginTop: 4 }}>
+              {u.twoFactorEnabled ? 'вход с кодом из Telegram' : 'вход по паролю'}
+            </span>
+          )}
+        </>
+      ),
+    },
     {
       key: 'locs',
       header: 'Точки',
@@ -324,6 +351,11 @@ export function UsersPanel() {
               }
             >
               Разблокировать
+            </Button>
+          )}
+          {u.twoFactorEnabled && u.id !== me?.id && (
+            <Button size="sm" onClick={() => void askReset(u)}>
+              Сбросить защиту
             </Button>
           )}
           <Button size="sm" onClick={() => setPasswordFor(u)}>

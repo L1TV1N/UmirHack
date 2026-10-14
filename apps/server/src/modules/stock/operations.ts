@@ -153,7 +153,7 @@ async function runDocument(deps: Deps, actor: Actor, opts: DocOptions, work: Wor
     }));
 
     // касса шлёт продажи потоком: сбрасывать кеш на каждую значило бы отключить его, там хватает фонового пересчёта
-    if (actor.principal.kind !== 'apikey') invalidateSnapshots(deps.db);
+    if (actor.principal.kind !== 'apikey') invalidateSnapshots(deps.db, actor.principal.orgId);
     scheduleStopListSync(deps, locations);
     return { documentId: doc.id, number: doc.number, duplicate: false };
   } catch (err) {

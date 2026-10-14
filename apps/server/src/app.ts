@@ -28,6 +28,7 @@ import { traceabilityRoutes } from './modules/traceability/routes';
 import { telegramRoutes } from './modules/telegram/routes';
 import { analyticsRoutes } from './modules/analytics/routes';
 import { authRoutes } from './modules/auth/routes';
+import { twoFactorRoutes } from './modules/auth/two-factor-routes';
 import { catalogRoutes } from './modules/catalog/routes';
 import { dishRoutes } from './modules/dishes/routes';
 import { inventoryRoutes } from './modules/inventory/routes';
@@ -39,12 +40,21 @@ import { stopListRoutes } from './modules/stoplist/routes';
 import { userRoutes } from './modules/users/routes';
 import { accessPlugin, open } from './plugins/access';
 import { errorsPlugin, send } from './plugins/errors';
+import { cacheHeaders, readCacheTrace, withCacheTrace } from './lib/cache-trace';
 import { invalidateSnapshots } from './modules/analytics/snapshot';
 import { securityPlugin } from './plugins/security';
 import { sql } from 'kysely';
 
 /** Доверяем заданному числу ближайших прокси, дальше по цепочке заголовку X-Forwarded-For не верим. */
 const hopsTrust = (hops: number) => (_address: string, hop: number) => hop < hops;
+
+/**
+ * Запросы, которые остатков, цен и рецептур не меняют: кеш расчётов они не сбрасывают, а клиентов не будят.
+ * Вход, обновление сессии и привязка Telegram происходят постоянно, и без этого списка каждый вход любого
+ * пользователя выбрасывал бы кеш всех организаций. Продажи с кассы кеш не сбрасывают намеренно: их стоп-лист
+ * пересчитывается в фоне.
+ */
+const KEEPS_CACHE = ['/api/pos/', '/api/auth/', '/api/telegram/', '/api/admin/cache/'];
 
 export async function buildApp(input: Omit<Deps, 'log'>): Promise<FastifyInstance> {
   useRussianErrors();
@@ -93,8 +103,22 @@ export async function buildApp(input: Omit<Deps, 'log'>): Promise<FastifyInstanc
 
   // Любая успешная запись может изменить остатки, цены, рецептуры или настройки: кеш расчётов сбрасываем,
   // пока ответ не ушёл клиенту, иначе следующий запрос мог бы увидеть старые цифры
+  // Сброс касается только организации автора: срезы остальных остаются. Запись без пользователя (обмен с кабинетом
+  // поставщика, регистрация) сбрасывает всё.
   app.addHook('onSend', async (req, reply) => {
-    if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS' && reply.statusCode < 400 && !req.url.startsWith('/api/pos/')) invalidateSnapshots(deps.db);
+    if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS' && reply.statusCode < 400 && !KEEPS_CACHE.some((prefix) => req.url.startsWith(prefix))) {
+      invalidateSnapshots(deps.db, req.principal?.orgId ?? null);
+    }
+  });
+
+  // Как обработан запрос кешем: X-Cache и Server-Timing видны в панели разработчика браузера
+  app.addHook('onRequest', (_req, _reply, done) => {
+    withCacheTrace(done);
+  });
+  app.addHook('onSend', async (req, reply) => {
+    if (!req.url.startsWith('/api/')) return;
+    const headers = cacheHeaders(readCacheTrace());
+    if (headers) for (const [name, value] of Object.entries(headers)) void reply.header(name, value);
   });
 
   app.addHook('onRequest', async (req) => {
@@ -116,6 +140,7 @@ export async function buildApp(input: Omit<Deps, 'log'>): Promise<FastifyInstanc
         api.get('/docs/openapi.json', { config: open, schema: { hide: true } }, async () => app.swagger());
       }
       await api.register(authRoutes(deps));
+      await api.register(twoFactorRoutes(deps));
       await api.register(userRoutes(deps));
       await api.register(locationRoutes(deps));
       await api.register(catalogRoutes(deps));
