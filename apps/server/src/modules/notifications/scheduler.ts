@@ -1,3 +1,4 @@
+import { retryPortalPushes } from '../supplier-portal/service';
 import { sql } from 'kysely';
 import type { Deps } from '../../lib/context';
 import { businessToday } from '../../lib/time';
@@ -31,6 +32,7 @@ export async function schedulerTick(deps: Deps): Promise<void> {
     // ручные стопы с истёкшим сроком и всё, что не поймали операции, уходит подписчикам здесь
     await publishStopList(deps, null).catch((err) => deps.log.error({ err }, 'не удалось подготовить вебхуки стоп-листа'));
     await cleanup(deps);
+    await retryPortalPushes(deps).catch((err) => deps.log.error({ err }, 'не удалось повторить отправку заказов в кабинет поставщика'));
 
     const settings = await getSettings(deps.db);
     const now = deps.clock();

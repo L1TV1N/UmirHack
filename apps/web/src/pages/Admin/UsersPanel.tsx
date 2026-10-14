@@ -4,12 +4,13 @@ import {
   ROLES,
   seesAllLocations,
   setPasswordBody,
+  type CreatedUserDto,
   type LocationDto,
   type Page,
   type Role,
   type UserDto,
 } from '@zapas/shared';
-import { Plus } from 'lucide-react';
+import { Copy, KeyRound, Plus } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
 import { ApiError, patch, post, put } from '../../api/client';
 import { useAction, useGet } from '../../api/hooks';
@@ -25,9 +26,24 @@ import { useToast } from '../../components/Toast/Toast';
 import { errorMessage } from '../../lib/errors';
 import { fmtDateTime } from '../../lib/format';
 
-const ROLE_TONE: Record<Role, Tone> = { admin: 'danger', manager: 'info', storekeeper: 'ok', viewer: 'neutral' };
+const ROLE_TONE: Record<Role, Tone> = { admin: 'danger', manager: 'info', storekeeper: 'ok', viewer: 'neutral', waiter: 'amber' };
 
-function UserDialog({ user, open, onClose, locations }: { user: UserDto | null; open: boolean; onClose: () => void; locations: LocationDto[] }) {
+// Без похожих знаков (0/O, 1/l/I): пароль читают с экрана и диктуют по телефону
+const PASSWORD_ALPHABET = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+export function randomPassword(): string {
+  const bytes = crypto.getRandomValues(new Uint32Array(14));
+  return Array.from(bytes, (b) => PASSWORD_ALPHABET[b % PASSWORD_ALPHABET.length]).join('');
+}
+
+const ROLE_HINT: Record<Role, string> = {
+  admin: 'Всё, включая заведения, сотрудников и подключения',
+  manager: 'Остатки, заказы поставщикам, заявки гостей, отчёты',
+  storekeeper: 'Приход, списание, перемещение, инвентаризация',
+  viewer: 'Только просмотр остатков и стоп-листа',
+  waiter: 'Принимает заказы гостей, видит стоп-лист и горячие предложения',
+};
+
+function UserDialog({ user, open, onClose, onCreated, locations }: { user: UserDto | null; open: boolean; onClose: () => void; onCreated: (u: CreatedUserDto) => void; locations: LocationDto[] }) {
   const toast = useToast();
   const editing = user !== null;
   const [email, setEmail] = useState('');
@@ -51,7 +67,7 @@ function UserDialog({ user, open, onClose, locations }: { user: UserDto | null; 
     setFormError(null);
   }, [open, user]);
 
-  const save = useAction((body: object) => (editing ? patch(`/users/${user.id}`, body) : post('/users', body)), ['/users']);
+  const save = useAction((body: object) => (editing ? patch<UserDto>(`/users/${user.id}`, body) : post<CreatedUserDto>('/users', body)), ['/users']);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -61,7 +77,7 @@ function UserDialog({ user, open, onClose, locations }: { user: UserDto | null; 
     if (editing) {
       body = { fullName: fullName.trim(), role, isActive, locationIds };
     } else {
-      const parsed = createUserBody.safeParse({ email, fullName, role, password, locationIds });
+      const parsed = createUserBody.safeParse({ email, fullName, role, locationIds, ...(password ? { password } : {}) });
       if (!parsed.success) {
         const out: Record<string, string> = {};
         for (const issue of parsed.error.issues) out[String(issue.path[0])] ??= issue.message;
@@ -73,9 +89,10 @@ function UserDialog({ user, open, onClose, locations }: { user: UserDto | null; 
     if (editing && !fullName.trim()) return setErrors({ fullName: 'Введите имя' });
     setErrors({});
     save.mutate(body, {
-      onSuccess: () => {
+      onSuccess: (res) => {
         toast.success(editing ? 'Пользователь сохранён' : 'Пользователь создан');
         onClose();
+        if (!editing) onCreated(res as CreatedUserDto);
       },
       onError: (err) => {
         if (err instanceof ApiError && err.code === 'duplicate_email') setErrors({ email: err.message });
@@ -122,16 +139,16 @@ function UserDialog({ user, open, onClose, locations }: { user: UserDto | null; 
             )}
           </Field>
           {!editing && (
-            <Field label="Пароль" error={errors.password} hint="Не короче 10 символов" required>
+            <Field label="Пароль" error={errors.password} hint="Оставьте пустым: система создаст временный, а человек сменит его при первом входе">
               {(p) => <Input {...p} type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />}
             </Field>
           )}
         </FieldRow>
         {seesAllLocations(role) ? (
-          <p className="muted">Эта роль видит все точки.</p>
+          <p className="muted">Эта роль видит все заведения организации.</p>
         ) : (
           <fieldset style={{ border: '1px solid var(--line)', borderRadius: 6, padding: '10px 14px', margin: 0 }}>
-            <legend style={{ padding: '0 6px', fontWeight: 600, fontSize: 12.5, color: 'var(--ink-700)' }}>Доступные точки</legend>
+            <legend style={{ padding: '0 6px', fontWeight: 600, fontSize: 12.5, color: 'var(--ink-700)' }}>Доступные заведения</legend>
             <div style={{ display: 'grid', gap: 8 }}>
               {locations.map((l) => (
                 <Checkbox
@@ -144,6 +161,9 @@ function UserDialog({ user, open, onClose, locations }: { user: UserDto | null; 
             </div>
           </fieldset>
         )}
+        <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+          {ROLE_HINT[role]}
+        </p>
         {editing && <Checkbox label="Учётная запись активна" checked={isActive} onChange={(e) => setActive(e.target.checked)} />}
         {formError && <ErrorNote message={formError} />}
       </form>
@@ -151,7 +171,53 @@ function UserDialog({ user, open, onClose, locations }: { user: UserDto | null; 
   );
 }
 
-function PasswordDialog({ user, onClose }: { user: UserDto | null; onClose: () => void }) {
+/** Данные для входа нового сотрудника. Пароль виден только сейчас: после закрытия окна его не восстановить. */
+function CredentialsDialog({ created, onClose }: { created: CreatedUserDto | null; onClose: () => void }) {
+  const toast = useToast();
+  const text = created ? `Запас: ${window.location.origin}\nПочта: ${created.email}\nВременный пароль: ${created.temporaryPassword ?? ''}\nПри первом входе система попросит сменить пароль.` : '';
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success('Данные для входа скопированы');
+    } catch {
+      toast.error('Не удалось скопировать, выделите текст вручную');
+    }
+  };
+  return (
+    <Dialog
+      open={created !== null}
+      onClose={onClose}
+      title={created?.temporaryPassword ? 'Данные для входа' : 'Пользователь создан'}
+      subtitle={created?.fullName}
+      width={480}
+      footer={
+        <>
+          {created?.temporaryPassword && (
+            <Button icon={<Copy size={15} />} onClick={() => void copy()}>
+              Скопировать
+            </Button>
+          )}
+          <Button variant="primary" onClick={onClose}>
+            Готово
+          </Button>
+        </>
+      }
+    >
+      {created?.temporaryPassword ? (
+        <>
+          <pre style={{ margin: 0, padding: 14, background: 'var(--surface-100)', borderRadius: 'var(--radius)', whiteSpace: 'pre-wrap', fontSize: 14, userSelect: 'all' }}>{text}</pre>
+          <p className="muted" style={{ marginTop: 12, fontSize: 13 }}>
+            Пароль показан один раз. Письмо не отправляется: почта на сервере пока не подключена, передайте данные сотруднику сами. Первый вход потребует сменить пароль.
+          </p>
+        </>
+      ) : (
+        <p>Пароль задан вами, при первом входе сотрудник должен его сменить.</p>
+      )}
+    </Dialog>
+  );
+}
+
+function PasswordDialog({ user, onClose, onSet }: { user: UserDto | null; onClose: () => void; onSet: (u: UserDto, password: string) => void }) {
   const toast = useToast();
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -171,6 +237,7 @@ function PasswordDialog({ user, onClose }: { user: UserDto | null; onClose: () =
       {
         onSuccess: () => {
           toast.success('Пароль задан, активные сессии пользователя закрыты');
+          if (user) onSet(user, password);
           onClose();
         },
         onError: (err) => setError(errorMessage(err)),
@@ -195,9 +262,12 @@ function PasswordDialog({ user, onClose }: { user: UserDto | null; onClose: () =
       }
     >
       <form id="password-form" onSubmit={submit} noValidate>
-        <Field label="Пароль" hint="Передайте его пользователю безопасным способом. Он сможет сменить его сам." error={error ?? undefined} required>
-          {(p) => <Input {...p} type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} autoFocus />}
+        <Field label="Пароль" hint="При первом входе человек выберет свой. Передайте этот пароль безопасным способом." error={error ?? undefined} required>
+          {(p) => <Input {...p} type="text" autoComplete="off" value={password} onChange={(e) => setPassword(e.target.value)} autoFocus />}
         </Field>
+        <Button size="sm" icon={<KeyRound size={14} />} onClick={() => setPassword(randomPassword())} style={{ marginTop: 10 }}>
+          Сгенерировать
+        </Button>
       </form>
     </Dialog>
   );
@@ -210,6 +280,7 @@ export function UsersPanel() {
   const locations = useGet<LocationDto[]>('/locations');
   const [editing, setEditing] = useState<UserDto | 'new' | null>(null);
   const [passwordFor, setPasswordFor] = useState<UserDto | null>(null);
+  const [credentials, setCredentials] = useState<CreatedUserDto | null>(null);
   const unlock = useAction((id: string) => post(`/users/${id}/unlock`), ['/users']);
   const names = new Map((locations.data ?? []).map((l) => [l.id, l.name]));
 
@@ -285,8 +356,9 @@ export function UsersPanel() {
           <DataTable columns={columns} rows={users.data?.items} rowKey={(u) => u.id} loading={users.isLoading} caption="Пользователи" />
         )}
       </Panel>
-      <UserDialog open={editing !== null} user={editing && editing !== 'new' ? editing : null} onClose={() => setEditing(null)} locations={(locations.data ?? []).filter((l) => l.isActive)} />
-      <PasswordDialog user={passwordFor} onClose={() => setPasswordFor(null)} />
+      <UserDialog open={editing !== null} user={editing && editing !== 'new' ? editing : null} onClose={() => setEditing(null)} onCreated={setCredentials} locations={(locations.data ?? []).filter((l) => l.isActive)} />
+      <PasswordDialog user={passwordFor} onClose={() => setPasswordFor(null)} onSet={(u, password) => setCredentials({ ...u, temporaryPassword: password })} />
+      <CredentialsDialog created={credentials} onClose={() => setCredentials(null)} />
     </>
   );
 }

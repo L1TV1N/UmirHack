@@ -22,7 +22,7 @@ export function newStopsText(stops: readonly AutoStop[]): string {
 
 async function principalOf(deps: Deps, userId: string) {
   const loaded = await loadUser(deps.db, userId);
-  return loaded && loaded.row.is_active ? userPrincipal(loaded.row, loaded.locationIds) : null;
+  return loaded && loaded.row.is_active ? userPrincipal(loaded) : null;
 }
 
 /** Личные уведомления тем, кто подписан на стоп-лист: каждому только то, что на его точках. */

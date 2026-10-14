@@ -3,6 +3,7 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { sql } from 'kysely';
 import type { Deps } from '../../lib/context';
 import { sha256Hex } from '../../lib/crypto';
+import { orgOf } from '../../lib/scope';
 import { badRequest, conflict, PG_UNIQUE_VIOLATION, pgCode } from '../../lib/errors';
 import { asUser, requireUser } from '../../plugins/access';
 import { writeAudit } from '../audit/audit';
@@ -26,7 +27,7 @@ export const catalogImportRoutes =
       { config: { ...asUser('manager'), rateLimit: { max: previewLimit, timeWindow: '1 minute' } }, bodyLimit: BODY_LIMIT, schema: { body: importBody } },
       async (req): Promise<ImportPreviewDto> => {
         try {
-          return (await planImport(db, Buffer.from(req.body.content, 'base64'), req.body.createCategories)).preview;
+          return (await planImport(db, Buffer.from(req.body.content, 'base64'), req.body.createCategories, orgOf(requireUser(req)))).preview;
         } catch (err) {
           if (err instanceof ImportFormatError) throw badRequest(err.message, undefined, 'import_format');
           throw err;
@@ -46,13 +47,14 @@ export const catalogImportRoutes =
             // импорты идут по одному: два одновременных файла с одними артикулами не должны спорить между собой
             await sql`SELECT pg_advisory_xact_lock(hashtext('zapas.catalog.import'))`.execute(trx);
             // файл разбирается заново в этой же транзакции, поэтому записывается ровно то, что сейчас видно в базе
-            const plan = await planImport(trx, bytes, req.body.createCategories);
+            const orgId = orgOf(principal);
+            const plan = await planImport(trx, bytes, req.body.createCategories, orgId);
             if (plan.creates.length + plan.updates.length === 0) throw conflict('Нечего применять: все строки без изменений или с ошибками', undefined, 'nothing_to_import');
 
             for (const name of plan.newCategories) {
-              await trx.insertInto('categories').values({ name }).onConflict((oc) => oc.expression(sql`lower(name)`).doNothing()).execute();
+              await trx.insertInto('categories').values({ org_id: orgId, name }).onConflict((oc) => oc.expression(sql`org_id, lower(name)`).doNothing()).execute();
             }
-            const categories = await trx.selectFrom('categories').select(['id', 'name']).execute();
+            const categories = await trx.selectFrom('categories').select(['id', 'name']).where('org_id', '=', orgId).execute();
             const categoryId = new Map(categories.map((c) => [c.name.toLowerCase(), c.id]));
 
             for (let from = 0; from < plan.creates.length; from += CHUNK) {
@@ -60,6 +62,7 @@ export const catalogImportRoutes =
                 .insertInto('products')
                 .values(
                   plan.creates.slice(from, from + CHUNK).map((c) => ({
+                    org_id: orgId,
                     sku: c.sku,
                     barcode: c.barcode ?? null,
                     name: c.name,

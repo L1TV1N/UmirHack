@@ -80,6 +80,11 @@ const order = (over: Partial<OrderDto> = {}): OrderDto => ({
   closedAt: null,
   emailedAt: null,
   emailError: null,
+  deliveryOn: null,
+  supplierNote: null,
+  buyerNote: null,
+  portalPushedAt: null,
+  portalError: null,
   ...over,
 });
 
@@ -154,7 +159,7 @@ describe('список заказов', () => {
     orders = [order(), order({ id: 'o2', number: 'ЗК-000002', status: 'draft' })];
     show('/orders?tab=orders');
     expect(screen.getByRole('tab', { name: /Заказы \(черновиков 1\)/ })).toBeTruthy();
-    expect(screen.getByText('Отправлен')).toBeTruthy();
+    expect(screen.getByText('Отправлен поставщику')).toBeTruthy();
     expect(screen.getByText('Черновик', { selector: 'span' })).toBeTruthy();
     fireEvent.click(screen.getByText('ЗК-000001'));
     expect(await screen.findByText('Открыт заказ o1')).toBeTruthy();

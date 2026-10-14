@@ -2,6 +2,7 @@ import type { Role } from '@zapas/shared';
 import { lazy, Suspense, type ReactNode } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router';
 import { useAuth } from '../auth/AuthProvider';
+import { useScope } from '../auth/ScopeProvider';
 import { Loading } from '../components/Feedback/Feedback';
 import { AppLayout } from '../components/Layout/AppLayout';
 
@@ -25,12 +26,41 @@ const DishesPage = lazy(() => import('../pages/Dishes/DishesPage'));
 const ReportsPage = lazy(() => import('../pages/Reports/ReportsPage'));
 const AdminPage = lazy(() => import('../pages/Admin/AdminPage'));
 const NotFoundPage = lazy(() => import('../pages/NotFound/NotFoundPage'));
+const RegisterPage = lazy(() => import('../pages/Login/RegisterPage'));
+const SelectLocationPage = lazy(() => import('../pages/Select/SelectLocationPage'));
+const ForcedPasswordPage = lazy(() => import('../pages/Login/ForcedPasswordPage'));
+const WaiterLayout = lazy(() => import('../pages/Waiter/WaiterLayout'));
+const WaiterOrderPage = lazy(() => import('../pages/Waiter/WaiterOrderPage'));
+const WaiterOrdersPage = lazy(() => import('../pages/Waiter/WaiterOrdersPage'));
+const WaiterHotPage = lazy(() => import('../pages/Waiter/WaiterHotPage'));
+const WaiterStopPage = lazy(() => import('../pages/Waiter/WaiterStopPage'));
 
 function Protected({ children }: { children: ReactNode }) {
-  const { status } = useAuth();
+  const { status, user } = useAuth();
   const location = useLocation();
   if (status === 'loading') return <Loading label="Проверяем сессию" />;
   if (status === 'anonymous') return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
+  // пароль выдал администратор: до смены доступна только страница смены пароля
+  if (user?.mustChangePassword) return <ForcedPasswordPage />;
+  return <>{children}</>;
+}
+
+/** Страницы, которые работают в выбранном заведении. Пока оно не выбрано, показываем выбор. */
+function RequireLocation({ children }: { children: ReactNode }) {
+  const scope = useScope();
+  const location = useLocation();
+  if (scope.loading) return <Loading label="Загружаем заведения" />;
+  const exempt = location.pathname === '/admin' || location.pathname === '/guide';
+  if (!scope.selected && !exempt) return <Navigate to="/select" replace />;
+  return <>{children}</>;
+}
+
+/** Официант видит только свои экраны, остальные роли их не видят. */
+function RoleSplit({ waiter, children }: { waiter: boolean; children: ReactNode }) {
+  const { user } = useAuth();
+  const isWaiter = user?.role === 'waiter';
+  if (isWaiter && !waiter) return <Navigate to="/waiter" replace />;
+  if (!isWaiter && waiter) return <Navigate to="/" replace />;
   return <>{children}</>;
 }
 
@@ -45,10 +75,40 @@ export function App() {
     <Suspense fallback={<Loading />}>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+        <Route
+          path="/select"
+          element={
+            <Protected>
+              <SelectLocationPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/waiter"
+          element={
+            <Protected>
+              <RoleSplit waiter>
+                <RequireLocation>
+                  <WaiterLayout />
+                </RequireLocation>
+              </RoleSplit>
+            </Protected>
+          }
+        >
+          <Route index element={<WaiterOrderPage />} />
+          <Route path="orders" element={<WaiterOrdersPage />} />
+          <Route path="hot" element={<WaiterHotPage />} />
+          <Route path="stop" element={<WaiterStopPage />} />
+        </Route>
         <Route
           element={
             <Protected>
-              <AppLayout />
+              <RoleSplit waiter={false}>
+                <RequireLocation>
+                  <AppLayout />
+                </RequireLocation>
+              </RoleSplit>
             </Protected>
           }
         >

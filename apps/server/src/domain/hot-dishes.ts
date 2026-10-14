@@ -1,6 +1,6 @@
-import { describeDaysLeft, formatQty, fromMilli, plural, roundMoney, type HotDishDto, type HotDishReasonDto, type Unit } from '@zapas/shared';
+import { describeDaysLeft, formatQty, fromMilli, plural, roundMoney, servesDishes, type HotDishDto, type HotDishReasonDto, type Unit } from '@zapas/shared';
 import { compareFefo } from './fefo';
-import type { RecBatch, RecDish, RecLocation, RecProduct, RecVelocity } from './recommendations';
+import { dishVisibleAt, type RecBatch, type RecDish, type RecLocation, type RecProduct, type RecVelocity } from './recommendations';
 import { computeBatchRisks } from './risk';
 import { portionsPossible, stockKey, type StockPoint } from './stoplist';
 
@@ -195,7 +195,7 @@ function hotDishesAt(location: RecLocation, input: HotInput): HotDishDto[] {
 
   const candidates: Candidate[] = [];
   for (const dish of input.dishes) {
-    if (dish.items.length === 0) continue;
+    if (dish.items.length === 0 || !dishVisibleAt(dish, location)) continue;
     if (input.blockedDishes?.has(`${dish.id}|${location.id}`)) continue;
     if (dish.items.some((i) => input.blockedProducts?.has(stockKey(i.productId, location.id)))) continue;
     if (!dish.items.some((i) => pools.has(i.productId))) continue;
@@ -296,7 +296,7 @@ export interface HotDishOptions {
 export function computeHotDishes(input: HotInput, options: HotDishOptions = {}): HotDishDto[] {
   const out: HotDishDto[] = [];
   for (const location of input.locations.values()) {
-    if (location.kind !== 'kitchen' || !location.isActive) continue;
+    if (!servesDishes(location.kind) || !location.isActive) continue;
     if (options.locationIds && !options.locationIds.includes(location.id)) continue;
     out.push(...hotDishesAt(location, input));
   }

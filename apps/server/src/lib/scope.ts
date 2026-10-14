@@ -21,3 +21,14 @@ export function locationFilter(p: Principal, requested?: string): string[] | nul
   }
   return p.locationIds === 'all' ? null : p.locationIds;
 }
+
+/** Организация вошедшего пользователя. У служебных задач её нет: они работают со всеми. */
+export function orgOf(p: Principal): string {
+  if (p.orgId === null) throw notFound('Организация');
+  return p.orgId;
+}
+
+/** Фильтр по организации для справочников: null только у служебных задач. */
+export function orgFilter(p: Principal): string | null {
+  return p.orgId;
+}

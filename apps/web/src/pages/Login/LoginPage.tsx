@@ -1,16 +1,21 @@
 import { loginBody } from '@zapas/shared';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { Navigate, useLocation } from 'react-router';
+import { Link, Navigate, useLocation } from 'react-router';
 import { ApiError } from '../../api/client';
 import { useAuth } from '../../auth/AuthProvider';
-import { Button } from '../../components/Button/Button';
+import { useScope } from '../../auth/ScopeProvider';
+import { Truck } from 'lucide-react';
+import { Button, ExternalButton } from '../../components/Button/Button';
 import { Field, Input } from '../../components/Controls/Controls';
 import { BrandMark } from '../../components/Layout/Brand';
+import { usePortalLink } from '../../lib/usePortalLink';
 import { TeamMark } from '../../components/TeamBanner/TeamMark';
 import styles from './LoginPage.module.scss';
 
 export default function LoginPage() {
   const { status, login, sessionEnded } = useAuth();
+  const scope = useScope();
+  const portal = usePortalLink();
   const location = useLocation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -24,8 +29,9 @@ export default function LoginPage() {
   }, []);
 
   if (status === 'authenticated') {
-    const from = (location.state as { from?: string } | null)?.from ?? '/';
-    return <Navigate to={from} replace />;
+    // после входа всегда выбор заведения; вернуться на прежнюю страницу можно, только если заведение уже выбрано
+    const from = (location.state as { from?: string } | null)?.from;
+    return <Navigate to={scope.selected && from ? from : '/select'} replace />;
   }
 
   const submit = async (e: FormEvent) => {
@@ -82,7 +88,7 @@ export default function LoginPage() {
       <section className={styles.formSide}>
         <form className={styles.form} onSubmit={submit} noValidate>
           <h2>Вход в систему</h2>
-          <p>Используйте рабочую почту и пароль, выданные администратором.</p>
+          <p>Используйте рабочую почту и пароль, выданные администратором, или создайте аккаунт своей организации.</p>
           {sessionEnded && !formError && (
             <div className={styles.notice} role="status">
               Сессия закончилась. Войдите снова, чтобы продолжить работу.
@@ -102,6 +108,17 @@ export default function LoginPage() {
           <Button variant="primary" type="submit" loading={busy} style={{ height: 40 }}>
             Войти
           </Button>
+          <p className={styles.alt}>
+            Нет учётной записи? <Link to="/register">Создать аккаунт организации</Link>
+          </p>
+          {portal && (
+            <div className={styles.supplier}>
+              <span>Вы поставщик?</span>
+              <ExternalButton href={portal} target="_self" icon={<Truck size={16} />} style={{ height: 40, justifyContent: 'center' }}>
+                Перейти в «Отгрузку»
+              </ExternalButton>
+            </div>
+          )}
         </form>
       </section>
     </div>

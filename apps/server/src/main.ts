@@ -15,6 +15,7 @@ import { HttpTelegramApi } from './modules/telegram/api';
 import { TelegramBot } from './modules/telegram/bot';
 import { drainStopListSync } from './modules/stoplist/service';
 import { socksFetch } from './modules/telegram/proxy';
+import { HttpSupplierPortal } from './modules/supplier-portal/client';
 
 loadEnvFile();
 const config = parseConfig();
@@ -30,7 +31,8 @@ const webhookSender = new HttpWebhookSender({ allowPrivate: config.webhooks.allo
 const exchangeTransport = new HttpExchangeTransport({ allowHosts: config.exchange.allowHosts });
 const mailer = config.smtp ? new SmtpMailer(config.smtp.url, config.smtp.from) : null;
 const weather = config.weatherEnabled ? new OpenMeteoProvider() : null;
-const base = { db: handle.db, config, clock: () => new Date(), notifier, telegram, invoiceReader, webhookSender, exchangeTransport, mailer, weather };
+const supplierPortal = config.supplierPortal ? new HttpSupplierPortal(config.supplierPortal.url, config.supplierPortal.secret, config.supplierPortal.publicUrl) : null;
+const base = { db: handle.db, config, clock: () => new Date(), notifier, telegram, invoiceReader, webhookSender, exchangeTransport, mailer, weather, supplierPortal };
 const app = await buildApp(base);
 const runtime = { ...base, log: app.log };
 const stopScheduler = config.scheduler ? startScheduler(runtime) : () => undefined;

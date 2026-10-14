@@ -2,6 +2,7 @@ import {
   checkPassword,
   type ChangePasswordBody,
   type LoginBody,
+  type RegisterBody,
   type SessionDto,
 } from '@zapas/shared';
 import { sql, type Transaction } from 'kysely';
@@ -10,7 +11,7 @@ import type { Database } from '../../db/types';
 import { addMilliseconds } from '../../lib/time';
 import { sha256Hex, randomToken } from '../../lib/crypto';
 import type { Deps, Principal, RequestMeta } from '../../lib/context';
-import { AppError, badRequest, unauthorized } from '../../lib/errors';
+import { AppError, badRequest, conflict, PG_UNIQUE_VIOLATION, pgCode, unauthorized } from '../../lib/errors';
 import { dropTelegramAccess } from '../telegram/links';
 import { writeAudit } from '../audit/audit';
 import { loadLocationIds, loadUser, toUserDto, type UserRow } from '../users/users';
@@ -83,6 +84,8 @@ async function issueSession(
     .returning('id')
     .executeTakeFirstOrThrow();
 
+  const org = await ex.selectFrom('organizations').select('name').where('id', '=', user.org_id).executeTakeFirstOrThrow();
+
   // токен доступа привязан к семейству сессии: выход или обнаружение кражи отзывают его сразу
   const accessToken = await signAccessToken(deps.config.jwtSecret, { id: user.id, role: user.role, sid: familyId }, deps.config.accessTokenTtl, now);
   return {
@@ -92,7 +95,7 @@ async function issueSession(
     session: {
       accessToken,
       expiresIn: deps.config.accessTokenTtl,
-      user: toUserDto(user, locationIds, now),
+      user: toUserDto(user, locationIds, now, org.name),
     },
   };
 }
@@ -150,6 +153,47 @@ export async function login(deps: Deps, body: LoginBody, meta: RequestMeta): Pro
     at: now,
   });
   return result;
+}
+
+/** Новая организация и её первый администратор. Дальше он сам создаёт точки и приглашает сотрудников. */
+export async function register(deps: Deps, body: RegisterBody, meta: RequestMeta): Promise<SessionResult> {
+  const now = deps.clock();
+  const passwordHash = await hashPassword(body.password);
+  try {
+    const user = await deps.db.transaction().execute(async (trx) => {
+      const org = await trx.insertInto('organizations').values({ name: body.organizationName }).returning('id').executeTakeFirstOrThrow();
+      const created = await trx
+        .insertInto('users')
+        .values({
+          org_id: org.id,
+          email: body.email,
+          full_name: body.fullName,
+          password_hash: passwordHash,
+          role: 'admin',
+          locked_until: null,
+          last_login_at: now,
+          password_changed_at: now,
+          created_at: now,
+          updated_at: now,
+        })
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      await writeAudit(trx, {
+        action: 'org.register',
+        entity: 'organization',
+        entityId: org.id,
+        email: body.email,
+        details: { organization: body.organizationName },
+        meta,
+        at: now,
+      });
+      return created;
+    });
+    return await issueSession(deps, deps.db, user, [], crypto.randomUUID(), meta);
+  } catch (err) {
+    if (pgCode(err) === PG_UNIQUE_VIOLATION) throw conflict('Пользователь с таким email уже есть', undefined, 'duplicate_email');
+    throw err;
+  }
 }
 
 export async function refresh(deps: Deps, rawToken: string, meta: RequestMeta): Promise<SessionResult> {
@@ -275,7 +319,7 @@ export async function changePassword(
   await deps.db.transaction().execute(async (trx) => {
     await trx
       .updateTable('users')
-      .set({ password_hash: passwordHash, password_changed_at: now, failed_attempts: 0, locked_until: null, updated_at: now })
+      .set({ password_hash: passwordHash, password_changed_at: now, failed_attempts: 0, locked_until: null, must_change_password: false, updated_at: now })
       .where('id', '=', row.id)
       .execute();
     await trx

@@ -5,7 +5,7 @@ import { businessToday } from '../../lib/time';
 import { writeOffExpired } from './operations';
 
 const SYSTEM_ACTOR: Actor = {
-  principal: { kind: 'system', name: 'Система', locationIds: 'all' },
+  principal: { kind: 'system', name: 'Система', orgId: null, locationIds: 'all' },
   meta: { ip: null, userAgent: null, requestId: 'system' },
 };
 

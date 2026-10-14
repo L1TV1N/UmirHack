@@ -23,7 +23,7 @@ const concrete = (url: string, value = UUID) => url.replace(/:[A-Za-z]+/g, value
 const routes = (): RouteInfo[] => env.app.routeTable;
 /** Поток событий не завершается сам, через inject его не обойти: он проверяется отдельно в events.test.ts. */
 const isStream = (r: RouteInfo): boolean => r.method === 'GET' && r.url === '/api/events';
-const tokens = (): Record<Role, string> => ({ viewer: w.viewerA.token, storekeeper: w.keeperA.token, manager: w.manager.token, admin: w.admin.token });
+const tokens = (): Record<Role, string> => ({ viewer: w.viewerA.token, waiter: w.waiterA.token, storekeeper: w.keeperA.token, manager: w.manager.token, admin: w.admin.token });
 const send = (token: string | null, r: RouteInfo, url = concrete(r.url), payload?: string) =>
   env.app.inject({
     method: r.method as 'GET',
@@ -35,7 +35,18 @@ const send = (token: string | null, r: RouteInfo, url = concrete(r.url), payload
 describe('таблица маршрутов', () => {
   it('открытыми без входа остаются только те, что должны', () => {
     const open = routes().filter((r) => r.access.kind === 'public').map((r) => `${r.method} ${r.url}`).sort();
-    expect(open).toEqual(['GET /api/health', 'GET /api/health/ready', 'POST /api/auth/login', 'POST /api/auth/logout', 'POST /api/auth/refresh']);
+    expect(open).toEqual([
+      'GET /api/health',
+      'GET /api/health/ready',
+      'GET /api/supplier-gateway/orders/:id',
+      'GET /api/supplier-portal/link',
+      'POST /api/auth/login',
+      'POST /api/auth/logout',
+      'POST /api/auth/refresh',
+      'POST /api/auth/register',
+      'POST /api/supplier-gateway/lookup',
+      'POST /api/supplier-gateway/status',
+    ]);
   });
 
   it('маршрутов достаточно много, чтобы проверка что-то значила', () => {

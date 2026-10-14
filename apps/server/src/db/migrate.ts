@@ -24,9 +24,10 @@ const DELETABLE = [
   'external_refs',
   'exchange_jobs',
   'pos_code_map',
+  'guest_order_lines',
 ];
 // Журналы только на добавление: даже владелец приложения не может переписать историю.
-const APPEND_ONLY = ['stock_movements', 'audit_log', 'batch_marks', 'haccp_readings', 'haccp_actions', 'haccp_inspections'];
+const APPEND_ONLY = ['stock_movements', 'audit_log', 'batch_marks', 'haccp_readings', 'haccp_actions', 'haccp_inspections', 'guest_order_events', 'purchase_order_events'];
 
 export interface MigrateOptions {
   url: string;

@@ -1,4 +1,4 @@
-import { checkPassword, DEFAULT_EXPIRY_THRESHOLDS, gtinCheckDigit, todayIn } from '@zapas/shared';
+import { checkPassword, DEFAULT_EXPIRY_THRESHOLDS, DEFAULT_ORG_ID, DEFAULT_ORG_NAME, gtinCheckDigit, todayIn } from '@zapas/shared';
 import { sql } from 'kysely';
 import type { Config } from '../../config';
 import { hashPassword } from '../../modules/auth/password';
@@ -6,6 +6,7 @@ import { writeAudit } from '../../modules/audit/audit';
 import { DEFAULT_SETTINGS } from '../../modules/settings/settings';
 import { createDb } from '../client';
 import { demoWeatherRange, DEMO_COORDINATES } from './weather';
+import { SECOND_ORG, seedPlatformDemo } from './extras';
 import { dishCode, DISHES, isMarked, kitchenDemandPerDay, LOCATIONS, packFor, PRODUCTS, RETAIL_DEMAND, SUPPLIERS, USERS, VSD_CATEGORIES } from './data';
 import { seedHaccp } from './haccp';
 import { seedTraceability } from './traceability';
@@ -47,7 +48,7 @@ export interface SeedResult {
   movements: number;
 }
 
-export async function seed(config: Config, options: { reset: boolean; log: (m: string) => void }): Promise<SeedResult> {
+export async function seed(config: Config, options: { reset: boolean; log: (m: string) => void; /** false: без официанта, заявок, заказов в пути и второй организации (их добавляет seed:platform). */ platform?: boolean }): Promise<SeedResult> {
   if (config.env === 'production') throw new Error('Демо-данные нельзя загружать в production');
 
   const handle = createDb(config.migrationDatabaseUrl, 2);
@@ -62,6 +63,8 @@ export async function seed(config: Config, options: { reset: boolean; log: (m: s
         select tablename from pg_tables where schemaname = 'public' and tablename <> 'schema_migrations'`.execute(db);
       await sql.raw(`TRUNCATE ${tables.rows.map((t) => `"${t.tablename}"`).join(', ')} RESTART IDENTITY CASCADE`).execute(db);
       await sql`ALTER SEQUENCE document_number_seq RESTART WITH 1`.execute(db);
+      await sql`ALTER SEQUENCE guest_order_seq RESTART WITH 1`.execute(db);
+      await sql`INSERT INTO organizations (id, name) VALUES (${DEFAULT_ORG_ID}, ${DEFAULT_ORG_NAME})`.execute(db);
       options.log('Данные очищены');
     }
 
@@ -74,8 +77,11 @@ export async function seed(config: Config, options: { reset: boolean; log: (m: s
       dishes: {} as Record<string, string>,
     };
 
+    const withPlatform = options.platform !== false;
+    const users = withPlatform ? USERS : USERS.filter((u) => u.role !== 'waiter');
+    const userIds = new Map<string, string>();
     const passwords = new Map<string, string>();
-    for (const u of USERS) {
+    for (const u of users) {
       const problem = checkPassword(u.password, { email: u.email, fullName: u.fullName });
       if (problem) throw new Error(`Пароль ${u.email} не проходит политику: ${problem}`);
       passwords.set(u.email, await hashPassword(u.password));
@@ -91,7 +97,7 @@ export async function seed(config: Config, options: { reset: boolean; log: (m: s
         ids.locations[l.key] = row.id;
       }
 
-      for (const u of USERS) {
+      for (const u of users) {
         const row = await trx
           .insertInto('users')
           .values({
@@ -107,6 +113,7 @@ export async function seed(config: Config, options: { reset: boolean; log: (m: s
           })
           .returning('id')
           .executeTakeFirstOrThrow();
+        userIds.set(u.email, row.id);
         const links = u.locations.map((key) => ({ user_id: row.id, location_id: ids.locations[key] as string }));
         if (links.length) await trx.insertInto('user_locations').values(links).execute();
       }
@@ -302,6 +309,7 @@ export async function seed(config: Config, options: { reset: boolean; log: (m: s
         ) x`.execute(trx);
       if (Number(broken.rows[0]?.n) > 0) throw new Error('Остатки партий не сходятся с журналом движений');
 
+      if (withPlatform) await seedPlatformDemo(trx, { now, today, locations: ids.locations, suppliers: ids.suppliers, products: ids.products, dishes: ids.dishes, userIds, passwordHash: await hashPassword(SECOND_ORG.adminPassword) });
       await seedTraceability(trx, now, today);
       await seedHaccp(trx, ids.locations, now, today);
 

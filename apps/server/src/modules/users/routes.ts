@@ -5,6 +5,7 @@ import {
   setPasswordBody,
   updateUserBody,
   usersQuery,
+  type CreatedUserDto,
   type UserDto,
 } from '@zapas/shared';
 import { sql, type Transaction } from 'kysely';
@@ -13,9 +14,10 @@ import type { Database } from '../../db/types';
 import type { Deps } from '../../lib/context';
 import { badRequest, conflict, notFound, PG_UNIQUE_VIOLATION, pgCode } from '../../lib/errors';
 import { asUser, requireUser } from '../../plugins/access';
+import { orgOf } from '../../lib/scope';
 import { dropTelegramAccess } from '../telegram/links';
 import { writeAudit } from '../audit/audit';
-import { hashPassword } from '../auth/password';
+import { generatePassword, hashPassword } from '../auth/password';
 import { loadLocationIds, toUserDto, type UserRow } from './users';
 
 export const userRoutes =
@@ -23,9 +25,9 @@ export const userRoutes =
   async (app) => {
     const { db } = deps;
 
-    async function assertLocationsExist(trx: Transaction<Database>, ids: string[]): Promise<void> {
+    async function assertLocationsExist(trx: Transaction<Database>, orgId: string, ids: string[]): Promise<void> {
       if (ids.length === 0) return;
-      const found = await trx.selectFrom('locations').select('id').where('id', 'in', ids).execute();
+      const found = await trx.selectFrom('locations').select('id').where('org_id', '=', orgId).where('id', 'in', ids).execute();
       if (found.length !== new Set(ids).size) {
         throw badRequest('Указана несуществующая точка', [{ path: ['locationIds'], message: 'Точка не найдена' }]);
       }
@@ -46,10 +48,11 @@ export const userRoutes =
     }
 
     /** Нельзя оставить систему без действующего администратора. */
-    async function assertNotLastAdmin(trx: Transaction<Database>, id: string): Promise<void> {
+    async function assertNotLastAdmin(trx: Transaction<Database>, orgId: string, id: string): Promise<void> {
       const others = await trx
         .selectFrom('users')
         .select(sql<number>`count(*)`.as('n'))
+        .where('org_id', '=', orgId)
         .where('role', '=', 'admin')
         .where('is_active', '=', true)
         .where('id', '<>', id)
@@ -61,7 +64,7 @@ export const userRoutes =
 
     app.get('/users', { config: asUser('admin'), schema: { querystring: usersQuery } }, async (req) => {
       const { q, limit, offset } = req.query;
-      let base = db.selectFrom('users');
+      let base = db.selectFrom('users').where('org_id', '=', orgOf(requireUser(req)));
       if (q) {
         const like = `%${q.replace(/[%_\\]/g, '\\$&')}%`;
         base = base.where((eb) => eb.or([eb('email', 'ilike', like), eb('full_name', 'ilike', like)]));
@@ -88,19 +91,24 @@ export const userRoutes =
 
     app.post('/users', { config: asUser('admin'), schema: { body: createUserBody } }, async (req, reply) => {
       const principal = requireUser(req);
+      const orgId = orgOf(principal);
       const body = req.body;
-      const passwordHash = await hashPassword(body.password);
+      // без пароля создаём временный: показываем его один раз, а при первом входе человек выберет свой
+      const temporary = body.password === undefined ? generatePassword({ email: body.email, fullName: body.fullName }) : null;
+      const passwordHash = await hashPassword(body.password ?? (temporary as string));
       const now = deps.clock();
       try {
         const row = await db.transaction().execute(async (trx) => {
-          await assertLocationsExist(trx, body.locationIds);
+          await assertLocationsExist(trx, orgId, body.locationIds);
           const created = await trx
             .insertInto('users')
             .values({
+              org_id: orgId,
               email: body.email,
               full_name: body.fullName,
               password_hash: passwordHash,
               role: body.role,
+              must_change_password: true,
               locked_until: null,
               last_login_at: null,
               password_changed_at: now,
@@ -117,11 +125,12 @@ export const userRoutes =
             principal,
             meta: req.meta,
             at: now,
-            details: { email: created.email, role: created.role, locationIds: body.locationIds },
+            details: { email: created.email, role: created.role, locationIds: body.locationIds, generatedPassword: temporary !== null },
           });
           return created;
         });
-        return reply.status(201).send(await toDto(row));
+        const dto: CreatedUserDto = { ...(await toDto(row)), temporaryPassword: temporary };
+        return reply.status(201).send(dto);
       } catch (err) {
         if (pgCode(err) === PG_UNIQUE_VIOLATION) throw conflict('Пользователь с таким email уже есть', undefined, 'duplicate_email');
         throw err;
@@ -133,13 +142,13 @@ export const userRoutes =
       const { fullName, role, isActive, locationIds } = req.body;
       const now = deps.clock();
       const row = await db.transaction().execute(async (trx) => {
-        const current = await trx.selectFrom('users').selectAll().where('id', '=', req.params.id).forUpdate().executeTakeFirst();
+        const current = await trx.selectFrom('users').selectAll().where('id', '=', req.params.id).where('org_id', '=', orgOf(principal)).forUpdate().executeTakeFirst();
         if (!current) throw notFound('Пользователь');
 
         const losesAdmin =
           current.role === 'admin' && current.is_active && ((role !== undefined && role !== 'admin') || isActive === false);
-        if (losesAdmin) await assertNotLastAdmin(trx, current.id);
-        if (locationIds) await assertLocationsExist(trx, locationIds);
+        if (losesAdmin) await assertNotLastAdmin(trx, current.org_id, current.id);
+        if (locationIds) await assertLocationsExist(trx, current.org_id, locationIds);
 
         const updated = await trx
           .updateTable('users')
@@ -182,7 +191,7 @@ export const userRoutes =
       async (req, reply) => {
         const principal = requireUser(req);
         const now = deps.clock();
-        const target = await db.selectFrom('users').select(['id', 'email', 'full_name']).where('id', '=', req.params.id).executeTakeFirst();
+        const target = await db.selectFrom('users').select(['id', 'email', 'full_name']).where('id', '=', req.params.id).where('org_id', '=', orgOf(principal)).executeTakeFirst();
         if (!target) throw notFound('Пользователь');
         const problem = checkPassword(req.body.password, { email: target.email, fullName: target.full_name });
         if (problem) throw badRequest(problem, [{ path: ['password'], message: problem }], 'weak_password');
@@ -190,7 +199,7 @@ export const userRoutes =
         await db.transaction().execute(async (trx) => {
           await trx
             .updateTable('users')
-            .set({ password_hash: passwordHash, password_changed_at: now, failed_attempts: 0, locked_until: null, updated_at: now })
+            .set({ password_hash: passwordHash, password_changed_at: now, failed_attempts: 0, locked_until: null, must_change_password: true, updated_at: now })
             .where('id', '=', target.id)
             .execute();
           await trx
@@ -223,6 +232,7 @@ export const userRoutes =
           .updateTable('users')
           .set({ failed_attempts: 0, locked_until: null, updated_at: now })
           .where('id', '=', req.params.id)
+          .where('org_id', '=', orgOf(principal))
           .returningAll()
           .executeTakeFirst();
         if (!updated) throw notFound('Пользователь');

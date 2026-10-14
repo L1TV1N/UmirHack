@@ -16,6 +16,8 @@ export interface AuditInput {
   principal?: Principal | null;
   /** Для событий без пользователя, например неудачного входа. */
   email?: string | null;
+  /** Организация, к которой относится запись. Если не задана, берётся из пользователя. */
+  orgId?: string | null;
   meta?: RequestMeta | null;
   at?: Date;
 }
@@ -53,6 +55,16 @@ export async function writeAudit(executor: Executor, input: AuditInput): Promise
   const ip = input.meta?.ip ?? null;
 
   const write = async (trx: Transaction<Database>): Promise<void> => {
+    let orgId = input.orgId ?? (principal && 'orgId' in principal ? principal.orgId : null);
+    if (!orgId && (userId || email)) {
+      const u = await trx
+        .selectFrom('users')
+        .select('org_id')
+        .$if(Boolean(userId), (qb) => qb.where('id', '=', userId as string))
+        .$if(!userId, (qb) => qb.where(sql<boolean>`lower(email) = ${String(email).toLowerCase()}`))
+        .executeTakeFirst();
+      orgId = u?.org_id ?? null;
+    }
     await sql`SELECT pg_advisory_xact_lock(${CHAIN_LOCK})`.execute(trx);
     const last = await trx.selectFrom('audit_log').select('hash').orderBy('id', 'desc').limit(1).executeTakeFirst();
     const prev = last?.hash ?? GENESIS;
@@ -78,6 +90,7 @@ export async function writeAudit(executor: Executor, input: AuditInput): Promise
         entity_id: input.entityId ?? null,
         ip,
         user_agent: input.meta?.userAgent?.slice(0, 200) ?? null,
+        org_id: orgId,
         details: JSON.stringify(details),
         prev_hash: prev,
         hash,
@@ -129,6 +142,8 @@ export async function verifyAuditChain(db: Db): Promise<AuditVerifyDto> {
 }
 
 export interface AuditFilter {
+  /** Записи только этой организации. */
+  orgId: string;
   action?: string;
   userEmail?: string;
   from?: string;
@@ -139,7 +154,7 @@ export interface AuditFilter {
 }
 
 export async function listAudit(db: Db, f: AuditFilter): Promise<{ items: AuditEntryDto[]; total: number }> {
-  let q = db.selectFrom('audit_log');
+  let q = db.selectFrom('audit_log').where('org_id', '=', f.orgId);
   if (f.action) q = q.where('action', 'like', `${f.action.replace(/[%_\\]/g, '\\$&')}%`);
   if (f.userEmail) q = q.where('user_email', 'ilike', `%${f.userEmail.replace(/[%_\\]/g, '\\$&')}%`);
   if (f.from) q = q.where(sql<boolean>`(at AT TIME ZONE ${f.tz})::date >= ${f.from}::date`);

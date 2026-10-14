@@ -155,3 +155,21 @@
   flex-direction: column;
   align-items: flex-start;
 }
+
+.alt {
+  margin: 4px 0 0;
+  color: var(--ink-600);
+  font-size: 14px;
+  text-align: center;
+}
+
+.supplier {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-600);
+  font-size: 14px;
+  text-align: center;
+}

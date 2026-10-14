@@ -17,6 +17,7 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { Deps } from '../../lib/context';
 import { randomToken, sha256Hex } from '../../lib/crypto';
 import { badRequest, conflict, forbidden, notFound, PG_FK_VIOLATION, pgCode } from '../../lib/errors';
+import { orgOf } from '../../lib/scope';
 import { asPos, asUser, requirePrincipal, requireUser } from '../../plugins/access';
 import { writeAudit } from '../audit/audit';
 import { listPosPresets } from './presets';
@@ -62,7 +63,7 @@ export const posRoutes =
 
     app.get('/pos/presets', { config: asUser('manager') }, async (): Promise<PosPresetDto[]> => listPosPresets());
 
-    app.get('/pos/connections', { config: asUser('manager') }, async (): Promise<PosConnectionDto[]> => Promise.all((await rows().orderBy('k.created_at', 'desc').execute()).map(toDto)));
+    app.get('/pos/connections', { config: asUser('manager') }, async (req): Promise<PosConnectionDto[]> => Promise.all((await rows().where('l.org_id', '=', orgOf(requireUser(req))).orderBy('k.created_at', 'desc').execute()).map(toDto)));
 
     app.post('/pos/connections', { config: asUser('admin'), schema: { body: createPosConnectionBody } }, async (req, reply) => {
       const principal = requireUser(req);
@@ -94,7 +95,7 @@ export const posRoutes =
       const now = deps.clock();
       const changes = { ...(b.name !== undefined ? { name: b.name } : {}), ...(b.vendor !== undefined ? { vendor: b.vendor } : {}), ...(b.rules !== undefined ? { rules: b.rules ? JSON.stringify(b.rules) : null } : {}) };
       await db.transaction().execute(async (trx) => {
-        const current = await trx.selectFrom('api_keys').select('id').where('id', '=', req.params.id).where('revoked_at', 'is', null).executeTakeFirst();
+        const current = await trx.selectFrom('api_keys as k').innerJoin('locations as l', 'l.id', 'k.location_id').select('k.id').where('l.org_id', '=', orgOf(principal)).where('k.id', '=', req.params.id).where('k.revoked_at', 'is', null).executeTakeFirst();
         if (!current) throw notFound('Подключение');
         if (Object.keys(changes).length === 0) return;
         await trx.updateTable('api_keys').set(changes).where('id', '=', current.id).execute();
@@ -105,7 +106,7 @@ export const posRoutes =
 
     /** Проверка правил на присланном образце: чек не записывается, видно, как он разобран и что найдено в номенклатуре. */
     app.post('/pos/connections/:id/preview', { config: asUser('manager'), schema: { params: idParam, body: posPreviewBody } }, async (req): Promise<PosPreviewDto> => {
-      const key = await rows().where('k.id', '=', req.params.id).executeTakeFirst();
+      const key = await rows().where('l.org_id', '=', orgOf(requireUser(req))).where('k.id', '=', req.params.id).executeTakeFirst();
       if (!key) throw notFound('Подключение');
       return previewReceipts(deps, key.id, normalizeReceipts(rulesOfKey(key), req.body.payload));
     });

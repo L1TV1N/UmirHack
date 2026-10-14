@@ -28,9 +28,12 @@ import {
   BookOpen,
   Thermometer,
   Truck,
+  ConciergeBell,
+  Repeat2,
 } from 'lucide-react';
 import { lazy, Suspense, useEffect, useRef, useState, type ComponentType } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
+import { useGet } from '../../api/hooks';
 import { useAuth } from '../../auth/AuthProvider';
 import { useScope } from '../../auth/ScopeProvider';
 import { fmtLongDate } from '../../lib/format';
@@ -51,6 +54,9 @@ interface NavItem {
   icon: ComponentType<{ size?: number }>;
   min?: Role;
   end?: boolean;
+  /** Пункт ведёт на вкладку страницы: подсвечивается по адресу вместе с параметром. */
+  tab?: string;
+  badge?: 'guest';
 }
 
 export const GROUPS: { title: string; items: NavItem[] }[] = [
@@ -60,6 +66,7 @@ export const GROUPS: { title: string; items: NavItem[] }[] = [
       { to: '/', label: 'Обзор', icon: LayoutDashboard, end: true },
       { to: '/stock', label: 'Остатки', icon: Boxes },
       { to: '/operations', label: 'Операции', icon: ArrowLeftRight },
+      { to: '/operations?tab=guest', label: 'Заявки гостей', icon: ConciergeBell, min: 'manager', tab: 'guest', badge: 'guest' },
       { to: '/inventory', label: 'Инвентаризация', icon: ClipboardCheck },
       { to: '/traceability', label: 'Прослеживаемость', icon: FileCheck2, min: 'storekeeper' },
       { to: '/haccp', label: 'Журнал HACCP', icon: Thermometer },
@@ -202,8 +209,11 @@ const CommandPalette = lazy(() => import('../CommandPalette/CommandPalette'));
 export function AppLayout() {
   const { can } = useAuth();
   const scope = useScope();
+  const navigate = useNavigate();
   const [navOpen, setNavOpen] = useState(false);
   const location = useLocation();
+  const guest = useGet<{ open: number; incidents: number }>('/guest-orders/summary', undefined, { enabled: can('manager'), refetchInterval: 30_000 });
+  const guestCount = (guest.data?.open ?? 0) + (guest.data?.incidents ?? 0);
   const { live } = useLiveUpdates();
   const { mode } = useUiMode();
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -244,12 +254,26 @@ export function AppLayout() {
             return (
               <div key={g.title} style={{ display: 'contents' }}>
                 <div className={styles.group}>{g.title}</div>
-                {items.map((i) => (
-                  <NavLink key={i.to} to={i.to} end={i.end ?? false} className={({ isActive }) => `${styles.link} ${isActive ? styles.active : ''}`}>
-                    <i.icon size={18} />
-                    {i.label}
-                  </NavLink>
-                ))}
+                {items.map((i) => {
+                  // вкладка страницы и сама страница подсвечиваются по-разному
+                  const onTab = new URLSearchParams(location.search).get('tab');
+                  const custom = i.tab !== undefined || (i.to === '/operations' && onTab === 'guest');
+                  return (
+                    <NavLink
+                      key={i.to}
+                      to={i.to}
+                      end={i.end ?? false}
+                      className={({ isActive }) => {
+                        const on = i.tab !== undefined ? location.pathname === '/operations' && onTab === i.tab : i.to === '/operations' && custom ? false : isActive;
+                        return `${styles.link} ${on ? styles.active : ''}`;
+                      }}
+                    >
+                      <i.icon size={18} />
+                      {i.label}
+                      {i.badge === 'guest' && guestCount > 0 && <span className={styles.badge}>{guestCount}</span>}
+                    </NavLink>
+                  );
+                })}
               </div>
             );
           })}
@@ -262,16 +286,27 @@ export function AppLayout() {
             <Menu size={18} />
           </button>
           <div className={styles.scope}>
-            <label htmlFor="scope-location">Точка</label>
-            <Select id="scope-location" value={scope.activeId} onChange={(e) => scope.setActive(e.target.value)} disabled={scope.activeLocations.length <= 1}>
-              {scope.activeLocations.length === 0 && <option value="all">Нет точек</option>}
-              {scope.canSeeAll && <option value="all">{can('manager') ? 'Все точки' : 'Все мои точки'}</option>}
+            <label htmlFor="scope-location">Заведение</label>
+            <Select id="scope-location" value={scope.activeId} onChange={(e) => scope.choose(e.target.value)}>
+              {!scope.selected && <option value="">Выберите заведение</option>}
               {scope.activeLocations.map((l) => (
                 <option key={l.id} value={l.id}>
                   {l.name}
                 </option>
               ))}
             </Select>
+            <button
+              type="button"
+              className={styles.switchLink}
+              onClick={() => {
+                scope.clear();
+                navigate('/select');
+              }}
+              title="Вернуться к выбору заведения"
+            >
+              <Repeat2 size={15} aria-hidden="true" />
+              <span>Сменить</span>
+            </button>
           </div>
           <div className={styles.spacer} />
           {mode === 'pro' && (

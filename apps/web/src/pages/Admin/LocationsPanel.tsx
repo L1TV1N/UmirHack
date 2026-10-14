@@ -88,8 +88,8 @@ export function LocationsPanel() {
 
   return (
     <>
-      <Panel title="Точки" subtitle="Склады, кухни и магазины" actions={<Button size="sm" variant="primary" icon={<Plus size={15} />} onClick={() => setEditing('new')}>Добавить</Button>}>
-        <DataTable columns={columns} rows={list.data} rowKey={(l) => l.id} loading={list.isLoading} caption="Точки" />
+      <Panel title="Заведения" subtitle="Склады, рестораны, магазины, кафе и бары" actions={<Button size="sm" variant="primary" icon={<Plus size={15} />} onClick={() => setEditing('new')}>Добавить</Button>}>
+        <DataTable columns={columns} rows={list.data} rowKey={(l) => l.id} loading={list.isLoading} caption="Заведения" />
       </Panel>
       <Dialog
         open={editing !== null}

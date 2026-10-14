@@ -17,6 +17,7 @@ import { z } from 'zod';
 import type { Deps } from '../../lib/context';
 import { encryptSecret } from '../../lib/crypto';
 import { badRequest, conflict, notFound, PG_FK_VIOLATION, pgCode, unprocessable } from '../../lib/errors';
+import { orgOf } from '../../lib/scope';
 import { asUser, requireUser } from '../../plugins/access';
 import { writeAudit } from '../audit/audit';
 import { assertWebhookUrl } from '../integrations/guard';
@@ -46,16 +47,16 @@ export const exchangeRoutes =
       return assertWebhookUrl(raw, { allowPrivate: trusted, allowHttp: trusted });
     };
 
-    const load = async (id: string) => {
-      const row = await db.selectFrom('external_systems').selectAll().where('id', '=', id).executeTakeFirst();
+    const load = async (id: string, org: string) => {
+      const row = await db.selectFrom('external_systems').selectAll().where('org_id', '=', org).where('id', '=', id).executeTakeFirst();
       if (!row) throw notFound('Система');
       return row;
     };
 
     app.get('/exchange/presets', { config: asUser('admin') }, async (): Promise<ExchangePresetDto[]> => listOneCPresets());
 
-    app.get('/exchange/systems', { config: asUser('manager') }, async (): Promise<ExternalSystemDto[]> => {
-      const rows = await db.selectFrom('external_systems').selectAll().orderBy('created_at').execute();
+    app.get('/exchange/systems', { config: asUser('manager') }, async (req): Promise<ExternalSystemDto[]> => {
+      const rows = await db.selectFrom('external_systems').selectAll().where('org_id', '=', orgOf(requireUser(req))).orderBy('created_at').execute();
       return Promise.all(rows.map((r) => toSystemDto(deps, r)));
     });
 
@@ -63,7 +64,7 @@ export const exchangeRoutes =
       const principal = requireUser(req);
       const b = req.body;
       const url = checkUrl(b.baseUrl);
-      const count = await db.selectFrom('external_systems').select((eb) => eb.fn.countAll<string>().as('n')).executeTakeFirstOrThrow();
+      const count = await db.selectFrom('external_systems').select((eb) => eb.fn.countAll<string>().as('n')).where('org_id', '=', orgOf(principal)).executeTakeFirstOrThrow();
       if (Number(count.n) >= MAX_SYSTEMS) throw conflict(`Систем обмена не больше ${MAX_SYSTEMS}`, undefined, 'too_many_systems');
       const now = deps.clock();
       try {
@@ -71,6 +72,7 @@ export const exchangeRoutes =
           const row = await trx
             .insertInto('external_systems')
             .values({
+              org_id: orgOf(principal),
               kind: b.kind,
               name: b.name,
               base_url: url.toString().replace(/\/$/, ''),
@@ -90,7 +92,7 @@ export const exchangeRoutes =
           await writeAudit(trx, { action: 'exchange.create', entity: 'exchange_system', entityId: row.id, principal, meta: req.meta, at: now, details: { name: b.name, kind: b.kind, host: url.host, docKinds: b.docKinds } });
           return row.id;
         });
-        return reply.status(201).send(await toSystemDto(deps, await load(id)));
+        return reply.status(201).send(await toSystemDto(deps, await load(id, orgOf(principal))));
       } catch (err) {
         if (pgCode(err) === PG_FK_VIOLATION) throw badRequest('Точка не найдена', [{ path: ['locationId'], message: 'Не найдена' }]);
         throw err;
@@ -104,7 +106,7 @@ export const exchangeRoutes =
       const now = deps.clock();
       try {
         await db.transaction().execute(async (trx) => {
-          const current = await trx.selectFrom('external_systems').select('id').where('id', '=', req.params.id).forUpdate().executeTakeFirst();
+          const current = await trx.selectFrom('external_systems').select('id').where('org_id', '=', orgOf(principal)).where('id', '=', req.params.id).forUpdate().executeTakeFirst();
           if (!current) throw notFound('Система');
           await trx
             .updateTable('external_systems')
@@ -127,7 +129,7 @@ export const exchangeRoutes =
         if (pgCode(err) === PG_FK_VIOLATION) throw badRequest('Точка не найдена', [{ path: ['locationId'], message: 'Не найдена' }]);
         throw err;
       }
-      return toSystemDto(deps, await load(req.params.id));
+      return toSystemDto(deps, await load(req.params.id, orgOf(requireUser(req))));
     });
 
     app.delete('/exchange/systems/:id', { config: asUser('admin'), schema: { params: idParam } }, async (req, reply) => {
@@ -142,17 +144,17 @@ export const exchangeRoutes =
     });
 
     app.post('/exchange/systems/:id/check', { config: asUser('admin'), schema: { params: idParam } }, async (req) => {
-      await load(req.params.id);
+      await load(req.params.id, orgOf(requireUser(req)));
       return checkSystem(deps, req.params.id);
     });
 
     app.get('/exchange/systems/:id/unlinked', { config: asUser('manager'), schema: { params: idParam } }, async (req): Promise<ExchangeMissingDto[]> => {
-      await load(req.params.id);
+      await load(req.params.id, orgOf(requireUser(req)));
       return listUnlinked(deps, req.params.id);
     });
 
     app.post('/exchange/systems/:id/autolink', { config: asUser('admin'), schema: { params: idParam } }, async (req) => {
-      await load(req.params.id);
+      await load(req.params.id, orgOf(requireUser(req)));
       try {
         return await autolink(deps, req.params.id);
       } catch (err) {
@@ -162,7 +164,7 @@ export const exchangeRoutes =
     });
 
     app.get('/exchange/systems/:id/search', { config: asUser('admin'), schema: { params: idParam, querystring: remoteSearchQuery } }, async (req): Promise<RemoteItemDto[]> => {
-      const system = await load(req.params.id);
+      const system = await load(req.params.id, orgOf(requireUser(req)));
       if (!deps.exchangeTransport) throw unprocessable('Отправка не настроена на сервере', undefined, 'exchange_disabled');
       try {
         return await searchCatalog(deps.exchangeTransport, connectionOf(deps, system), req.query.entity, req.query.q);
@@ -173,7 +175,7 @@ export const exchangeRoutes =
 
     app.put('/exchange/systems/:id/links', { config: asUser('manager'), schema: { params: idParam, body: linkBody } }, async (req) => {
       const principal = requireUser(req);
-      await load(req.params.id);
+      await load(req.params.id, orgOf(requireUser(req)));
       const woke = await saveLink(deps, req.params.id, req.body.entity, req.body.localId, req.body.remoteKey);
       await writeAudit(db, { action: 'exchange.link', entity: 'exchange_system', entityId: req.params.id, principal, meta: req.meta, at: deps.clock(), details: { entity: req.body.entity, localId: req.body.localId } });
       return { woke };
@@ -200,7 +202,7 @@ export const exchangeRoutes =
 
     app.post('/documents/:id/exchange', { config: asUser('manager'), schema: { params: idParam, body: pushDocumentBody } }, async (req) => {
       const principal = requireUser(req);
-      await load(req.body.systemId);
+      await load(req.body.systemId, orgOf(requireUser(req)));
       const doc = await db.selectFrom('documents').select(['id', 'kind']).where('id', '=', req.params.id).executeTakeFirst();
       if (!doc) throw notFound('Документ');
       if (!['receipt', 'writeoff', 'transfer', 'inventory'].includes(doc.kind)) throw unprocessable('Этот вид документа не выгружается', undefined, 'not_exportable');

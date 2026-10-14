@@ -95,6 +95,10 @@ docker compose up -d --build
 
 Данные остаются в томе `pgdata`, миграции применяются сами.
 
+## Кабинет поставщика
+
+Кабинет «Отгрузка» это второй сервис compose (`supplier`, порт 3100, база SQLite в томе `supplier-data`). В `.env` нужны `SUPPLIER_PORTAL_SECRET` и `SUPPLIER_SESSION_SECRET` (случайные, от 32 знаков). Для nginx добавляется `location /supplier/` на 127.0.0.1:3100, в `server-setup-nginx.sh` он уже есть. На работающем сервере всё это делает `bash deploy/enable-supplier.sh`: допишет секреты в `.env`, добавит адрес в nginx (с копией прежнего конфига), пересоберёт и запустит `app` и `supplier`. Демо-кабинеты и заказы: `docker compose --profile demo run --rm seed-platform`, затем `supplier-seed` и `portal-sync`.
+
 ## Резервная копия
 
 ```bash

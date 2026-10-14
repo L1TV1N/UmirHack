@@ -43,7 +43,8 @@ POST /api/auth/login
 | `POST /auth/refresh` | новый токен по cookie, cookie ротируется |
 | `POST /auth/logout` | закрыть сессию |
 | `GET /auth/me` | текущий пользователь |
-| `POST /auth/change-password` | смена пароля, закрывает все сессии |
+| `POST /auth/register` | `{ organizationName, fullName, email, password }`: новая организация и её администратор, сразу открывает сессию (201). 409 `duplicate_email` |
+| `POST /auth/change-password` | смена пароля, закрывает все сессии. Пока не сменён временный пароль, сервер отвечает 403 `password_change_required` на всё, кроме `/auth/me` и этого адреса |
 
 ## Операции
 
@@ -158,6 +159,41 @@ X-Api-Key: zk_…
 | `PUT /suppliers/:id/item-map` | кладовщик и выше: `{ items: [{ key, productId }] }`, запоминает соответствие строк накладной поставщика продуктам |
 
 Приход создаёт обычный `POST /documents/receipts`: клиент подставляет в него строки из разобранной накладной.
+
+## Организации и официанты
+
+У каждого пользователя есть организация. Заведения, справочники, настройки, пользователи, ключи касс, вебхуки, системы обмена и журнал аудита видны только внутри неё: чужая запись это 404. Администратор и менеджер видят все заведения организации, остальные назначенные.
+
+| Метод и адрес | Что делает |
+|---|---|
+| `POST /users` | администратор: `{ email, fullName, role, locationIds, password? }`. Роли: `admin`, `manager`, `storekeeper`, `viewer`, `waiter`. Без `password` создаётся временный: ответ `CreatedUserDto` с `temporaryPassword` (виден только здесь), у пользователя `mustChangePassword: true` |
+| `POST /locations` | администратор: `{ code, name, kind, address? }`, `kind`: `warehouse`, `kitchen`, `shop`, `cafe`, `bar`. Заведение попадает в организацию автора |
+| `GET /waiter/menu?locationId` | меню заведения: блюда с ингредиентами, `stopped`, короткой причиной `stopNote` без количеств, пометкой `hot` |
+| `GET /waiter/hot-dishes?locationId` | только блюдо, цена, сколько порций предложить, приоритет |
+| `GET /waiter/stop-list?locationId` | что нельзя заказать и почему одной строкой |
+| `POST /guest-orders` | официант, менеджер, администратор: `{ locationId, tableLabel, comment?, lines: [{ dishId, quantity, note? }] }` → 201. 409 `dish_stopped`, 422 `not_a_kitchen`, 404 для чужого заведения |
+| `GET /guest-orders?locationId&status&mine` | `status`: `new`, `in_progress`, `served`, `cancelled`, `open`, `all`. Официант видит только свои |
+| `GET /guest-orders/summary` | `{ open, incidents }` для счётчика в меню |
+| `GET /guest-orders/:id` | заказ со строками, обращениями и историей |
+| `POST /guest-orders/:id/status` | `{ status: in_progress \| served \| cancelled, comment? }`. Менеджер и администратор двигают заказ; `in_progress` списывает продукты по рецептуре (документ продажи), при нехватке заказ остаётся принятым; официант может только отменить свой заказ со статусом `new`, причина обязательна |
+| `POST /guest-orders/:id/incidents` | `{ lineId?, kind, blame, comment }`: обращение по заказу, который готовят или выдан. `kind`: `dropped`, `wrong_dish`, `complaint`, `kitchen_defect`, `other`; `blame`: `waiter`, `kitchen`, `guest`, `venue` |
+| `POST /guest-orders/incidents/:id/resolve` | менеджер: `{ action: remake \| dismiss, lineId?, comment? }`. `remake` добавляет блюдо без оплаты и списывает продукты как бой (документ списания, потеря в `lossCost`); 400 `incident_line_required`, если позиция не указана и блюд несколько |
+
+Официанту закрыты все остальные маршруты учёта: для них нужна роль не ниже наблюдателя (403).
+
+## Кабинет поставщика
+
+Запросы между «Запасом» и кабинетом подписаны: заголовки `x-zapas-timestamp` (секунды) и `x-zapas-signature` (HMAC-SHA256 от `время.содержимое`, содержимое в каноничном JSON), общий секрет `SUPPLIER_PORTAL_SECRET`, допустимый разброс времени 5 минут. Без верной подписи 401 `bad_signature`.
+
+| Метод и адрес | Что делает |
+|---|---|
+| `POST /supplier-gateway/status` | от кабинета: `{ externalId, status: confirmed \| declined \| shipped, note?, deliveryOn? }`. Допустимы переходы `sent` → любой, `confirmed` → `shipped` или `declined`; повтор того же статуса безвреден, обратный ход 409 `bad_transition` |
+| `POST /supplier-gateway/lookup` | от кабинета: `{ inn }` → `{ known, name, buyers }` |
+| `GET /supplier-gateway/orders/:id` | от кабинета: текущее состояние заказа в виде `PortalOrderPush` |
+| `GET /supplier-portal/link` | открытый адрес: `{ url }` кабинета поставщика для кнопки на экране входа, `null`, если кабинет не подключён |
+| `POST /orders/:id/decision` | менеджер: `{ decision: refuse \| remark, comment }`: отказ от поставки (статус `refused`) или замечание по приёмке; оба уходят в кабинет |
+
+Заказ поставщику получил статусы `confirmed`, `shipped`, `declined`, `refused` и поля `deliveryOn`, `supplierNote`, `buyerNote`, `portalPushedAt`, `portalError`, историю `events`. Кабинет принимает заказ на `POST {SUPPLIER_PORTAL_URL}/api/gateway/orders`.
 
 ## Заказы поставщикам
 

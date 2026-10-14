@@ -1,8 +1,10 @@
 import {
   addDays,
   formatMoney,
+  OPEN_ORDER_STATUSES,
   type OrderDetailDto,
   type OrderDto,
+  type OrderEventDto,
   type OrderLineDto,
   type OrderSentPayload,
   type OrderStatus,
@@ -17,6 +19,7 @@ import { businessToday } from '../../lib/time';
 import { writeAudit } from '../audit/audit';
 import { enqueueEvent } from '../integrations/service';
 import { escapeHtml } from '../notifications/notifier';
+import { addOrderEvent, pushOrder } from '../supplier-portal/service';
 import { describeMailError } from './mailer';
 import { suggestOrders } from './suggest';
 import { orderText } from './text';
@@ -46,6 +49,11 @@ interface HeaderRow {
   closed_at: Date | null;
   emailed_at: Date | null;
   email_error: string | null;
+  delivery_on: string | null;
+  supplier_note: string | null;
+  buyer_note: string | null;
+  portal_pushed_at: Date | null;
+  portal_error: string | null;
   line_count: string;
 }
 
@@ -74,6 +82,11 @@ export const headerSelect = (db: Executor) =>
       'o.closed_at',
       'o.emailed_at',
       'o.email_error',
+      'o.delivery_on',
+      'o.supplier_note',
+      'o.buyer_note',
+      'o.portal_pushed_at',
+      'o.portal_error',
       sql<string>`(select count(*) from purchase_order_lines x where x.order_id = o.id)`.as('line_count'),
     ]);
 
@@ -97,6 +110,11 @@ export function toOrderDto(r: HeaderRow): OrderDto {
     closedAt: r.closed_at?.toISOString() ?? null,
     emailedAt: r.emailed_at?.toISOString() ?? null,
     emailError: r.email_error,
+    deliveryOn: r.delivery_on,
+    supplierNote: r.supplier_note,
+    buyerNote: r.buyer_note,
+    portalPushedAt: r.portal_pushed_at?.toISOString() ?? null,
+    portalError: r.portal_error,
   };
 }
 
@@ -121,16 +139,22 @@ async function loadItems(db: Executor, orderId: string): Promise<OrderLineDto[]>
   }));
 }
 
+async function loadEvents(db: Executor, orderId: string): Promise<OrderEventDto[]> {
+  const rows = await db.selectFrom('purchase_order_events').selectAll().where('order_id', '=', orderId).orderBy('seq').execute();
+  return rows.map((r) => ({ id: r.id, side: r.side, status: r.status, text: r.text, actor: r.actor, at: r.created_at.toISOString() }));
+}
+
 export async function loadOrderDetail(deps: Deps, db: Executor, id: string): Promise<(OrderDetailDto & { locationAddress: string | null }) | null> {
   const row = await headerSelect(db).where('o.id', '=', id).executeTakeFirst();
   if (!row) return null;
   const items = await loadItems(db, id);
+  const events = await loadEvents(db, id);
   const dto = toOrderDto(row as HeaderRow);
   const text = orderText(
     { number: dto.number, createdAt: row.created_at, supplierName: dto.supplierName, locationName: dto.locationName, locationAddress: row.location_address, expectedOn: dto.expectedOn, comment: dto.comment, total: dto.total, timeZone: deps.config.businessTz },
     items,
   );
-  return { ...dto, items, text, locationAddress: row.location_address };
+  return { ...dto, items, events, text, locationAddress: row.location_address };
 }
 
 export interface DraftLine {
@@ -152,10 +176,11 @@ async function assertLines(trx: Executor, lines: DraftLine[]): Promise<void> {
 }
 
 async function assertParties(trx: Executor, supplierId: string, locationId: string): Promise<void> {
-  const supplier = await trx.selectFrom('suppliers').select('is_active').where('id', '=', supplierId).executeTakeFirst();
-  if (!supplier || !supplier.is_active) throw badRequest('Поставщик не найден или отключён', [{ path: ['supplierId'], message: 'Недоступен для заказов' }]);
-  const location = await trx.selectFrom('locations').select('is_active').where('id', '=', locationId).executeTakeFirst();
+  const location = await trx.selectFrom('locations').select(['is_active', 'org_id']).where('id', '=', locationId).executeTakeFirst();
   if (!location || !location.is_active) throw badRequest('Точка не найдена или отключена', [{ path: ['locationId'], message: 'Недоступна' }]);
+  // поставщик из справочника другой организации для этой точки всё равно что несуществующий
+  const supplier = await trx.selectFrom('suppliers').select('is_active').where('id', '=', supplierId).where('org_id', '=', location.org_id).executeTakeFirst();
+  if (!supplier || !supplier.is_active) throw badRequest('Поставщик не найден или отключён', [{ path: ['supplierId'], message: 'Недоступен для заказов' }]);
 }
 
 function assertExpected(deps: Deps, expectedOn: string | null | undefined): void {
@@ -280,6 +305,7 @@ export async function sendOrder(deps: Deps, principal: UserPrincipal, meta: Requ
     const total = roundMoney(lines.reduce((s, l) => s + Number(l.quantity) * Number(l.unit_cost), 0));
 
     await trx.updateTable('purchase_orders').set({ status: 'sent', sent_at: now, sent_by: principal.id, total, updated_at: now }).where('id', '=', id).execute();
+    await addOrderEvent(trx, id, 'buyer', 'sent', 'Заказ отправлен поставщику', principal.fullName, now);
     await writeAudit(trx, { action: 'order.send', entity: 'purchase_order', entityId: id, principal, meta, at: now, details: { number: row.number, supplier: supplier.name, locationId: row.location_id, lines: lines.length, total } });
 
     const payload: OrderSentPayload = {
@@ -299,6 +325,7 @@ export async function sendOrder(deps: Deps, principal: UserPrincipal, meta: Requ
     await enqueueEvent(trx, 'order.sent', payload, row.location_id, now);
   });
 
+  await pushOrder(deps, id);
   await emailOrder(deps, id, principal.email);
   if (deps.notifier.enabled) {
     const d = await loadOrderDetail(deps, deps.db, id);
@@ -317,8 +344,9 @@ export async function cancelOrder(deps: Deps, principal: UserPrincipal, meta: Re
     if (!row) throw notFound('Заказ');
     assertLocation(principal, row.location_id);
     if (row.status === 'partial') throw conflict('Часть заказа уже принята: закройте заказ вместо отмены', undefined, 'order_partial');
-    if (row.status !== 'draft' && row.status !== 'sent') throw conflict('Этот заказ уже закрыт', undefined, 'order_closed');
+    if (row.status !== 'draft' && row.status !== 'sent' && row.status !== 'confirmed') throw conflict('Этот заказ уже закрыт или отгружен: оформите отказ от поставки', undefined, 'order_closed');
     await trx.updateTable('purchase_orders').set({ status: 'cancelled', closed_at: now, updated_at: now }).where('id', '=', id).execute();
+    if (row.status !== 'draft') await addOrderEvent(trx, id, 'buyer', 'cancelled', 'Заказ отменён покупателем', principal.fullName, now);
     await writeAudit(trx, { action: 'order.cancel', entity: 'purchase_order', entityId: id, principal, meta, at: now, details: { number: row.number, was: row.status } });
   });
 }
@@ -330,9 +358,10 @@ export async function closeOrder(deps: Deps, principal: UserPrincipal, meta: Req
     const row = await trx.selectFrom('purchase_orders').select(['id', 'number', 'status', 'location_id', 'comment']).where('id', '=', id).forUpdate().executeTakeFirst();
     if (!row) throw notFound('Заказ');
     assertLocation(principal, row.location_id);
-    if (row.status !== 'sent' && row.status !== 'partial') throw conflict('Закрыть можно отправленный заказ', undefined, 'order_not_open');
+    if (!OPEN_ORDER_STATUSES.includes(row.status as OrderStatus)) throw conflict('Закрыть можно отправленный заказ', undefined, 'order_not_open');
     const note = comment ? `${row.comment ? `${row.comment}\n` : ''}Закрыт: ${comment}` : row.comment;
     await trx.updateTable('purchase_orders').set({ status: 'received', closed_at: now, updated_at: now, comment: note }).where('id', '=', id).execute();
+    await addOrderEvent(trx, id, 'buyer', 'received', `Заказ закрыт${comment ? `: ${comment}` : ''}`, principal.fullName, now);
     await writeAudit(trx, { action: 'order.close', entity: 'purchase_order', entityId: id, principal, meta, at: now, details: { number: row.number, was: row.status, comment: comment ?? null } });
   });
 }
@@ -348,7 +377,7 @@ export async function lockOrderForReceipt(trx: Transaction<Database>, orderId: s
   const row = await trx.selectFrom('purchase_orders').select(['id', 'number', 'status', 'supplier_id', 'location_id']).where('id', '=', orderId).forUpdate().executeTakeFirst();
   if (!row) throw notFound('Заказ');
   if (row.location_id !== locationId) throw badRequest('Заказ оформлен на другую точку', [{ path: ['orderId'], message: 'Другая точка' }], 'order_location_mismatch');
-  if (row.status !== 'sent' && row.status !== 'partial') throw conflict('Этот заказ не ждёт приёмки', undefined, 'order_not_open');
+  if (!OPEN_ORDER_STATUSES.includes(row.status as OrderStatus)) throw conflict('Этот заказ не ждёт приёмки', undefined, 'order_not_open');
   if (supplierId && supplierId !== row.supplier_id) throw badRequest('Поставщик прихода не совпадает с поставщиком заказа', [{ path: ['supplierId'], message: 'Другой поставщик' }], 'order_supplier_mismatch');
   return { id: row.id, number: row.number, supplierId: row.supplier_id };
 }
@@ -374,12 +403,16 @@ export async function applyReceiptToOrder(trx: Transaction<Database>, order: Ord
     .where('order_id', '=', order.id)
     .executeTakeFirstOrThrow();
   const complete = Number(state.open) === 0;
-  const status: OrderStatus = complete ? 'received' : Number(state.received) > 0 ? 'partial' : 'sent';
+  const current = await trx.selectFrom('purchase_orders').select('status').where('id', '=', order.id).executeTakeFirstOrThrow();
+  const status: OrderStatus = complete ? 'received' : Number(state.received) > 0 ? 'partial' : (current.status as OrderStatus);
   await trx
     .updateTable('purchase_orders')
     .set({ status, updated_at: now, ...(complete ? { closed_at: now } : {}) })
     .where('id', '=', order.id)
     .execute();
+  if (status !== current.status || complete) {
+    await addOrderEvent(trx, order.id, 'buyer', status, complete ? 'Поставка принята полностью' : 'Поставка принята частично', 'Приёмка', now);
+  }
   return { extra };
 }
 

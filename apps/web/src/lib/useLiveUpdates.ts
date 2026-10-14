@@ -4,7 +4,7 @@ import { STOCK_PREFIXES } from '../api/hooks';
 import { connectLive } from '../api/live';
 
 /** Что перечитывается, когда сервер сообщил об изменениях. */
-const LIVE_PREFIXES = [...STOCK_PREFIXES, '/orders'];
+const LIVE_PREFIXES = [...STOCK_PREFIXES, '/orders', '/guest-orders', '/waiter'];
 /** Несколько сигналов подряд обновляют данные один раз. */
 const REFRESH_DELAY_MS = 250;
 

@@ -2,7 +2,7 @@ import type { SessionDto } from '@zapas/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api, ApiError, refreshSession, session } from './client';
 
-const user = { id: 'u1', email: 'a@b.ru', fullName: 'Тест', role: 'admin' as const, isActive: true, locationIds: [], lastLoginAt: null, lockedUntil: null, createdAt: '2026-10-08T00:00:00Z' };
+const user = { id: 'u1', email: 'a@b.ru', fullName: 'Тест', role: 'admin' as const, isActive: true, locationIds: [], lastLoginAt: null, lockedUntil: null, organizationId: 'o', organizationName: 'Орг', mustChangePassword: false, createdAt: '2026-10-08T00:00:00Z' };
 const sessionBody = (token: string): SessionDto => ({ accessToken: token, expiresIn: 900, user });
 
 const json = (status: number, body?: unknown) =>

@@ -15,6 +15,8 @@ import type { Deps } from './lib/context';
 import { adminRoutes } from './modules/admin/routes';
 import { invoiceRoutes } from './modules/invoices/routes';
 import { eventRoutes } from './modules/events/routes';
+import { guestOrderRoutes } from './modules/guest-orders/routes';
+import { supplierGatewayRoutes } from './modules/supplier-portal/routes';
 import { haccpRoutes } from './modules/haccp/routes';
 import { forecastRoutes } from './modules/forecast/routes';
 import { catalogImportRoutes } from './modules/catalog/import-routes';
@@ -136,6 +138,8 @@ export async function buildApp(input: Omit<Deps, 'log'>): Promise<FastifyInstanc
       await api.register(forecastRoutes(deps));
       await api.register(eventRoutes(deps));
       await api.register(haccpRoutes(deps));
+      await api.register(guestOrderRoutes(deps));
+      await api.register(supplierGatewayRoutes(deps));
     },
     { prefix: '/api' },
   );

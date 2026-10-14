@@ -36,7 +36,7 @@ export async function suggestOrders(deps: Deps, locationIds: string[] | null, fi
     .selectFrom('purchase_order_lines as l')
     .innerJoin('purchase_orders as o', 'o.id', 'l.order_id')
     .select(['l.product_id', 'o.location_id', (eb) => eb.fn.sum<string>(eb('l.quantity', '-', eb.ref('l.received_qty'))).as('qty')])
-    .where('o.status', 'in', ['sent', 'partial'])
+    .where('o.status', 'in', ['sent', 'confirmed', 'shipped', 'partial'])
     .groupBy(['l.product_id', 'o.location_id'])
     .execute();
   const incoming = new Map(incomingRows.map((r) => [stockKey(r.product_id, r.location_id), Math.max(0, Number(r.qty))]));

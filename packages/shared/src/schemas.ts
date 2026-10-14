@@ -100,10 +100,12 @@ export const createUserBody = z
     email,
     fullName: text(120),
     role: z.enum(ROLES),
-    password,
+    /** Без пароля система сама сгенерирует временный и потребует сменить его при первом входе. */
+    password: password.optional(),
     locationIds: locationIds.default([]),
   })
   .superRefine((v, ctx) => {
+    if (v.password === undefined) return;
     const problem = checkPassword(v.password, { email: v.email, fullName: v.fullName });
     if (problem) ctx.addIssue({ code: 'custom', path: ['password'], message: problem });
   });

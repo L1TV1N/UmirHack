@@ -1,17 +1,21 @@
 import type { Unit } from './enums';
 
-export const ORDER_STATUSES = ['draft', 'sent', 'partial', 'received', 'cancelled'] as const;
+export const ORDER_STATUSES = ['draft', 'sent', 'confirmed', 'shipped', 'partial', 'received', 'declined', 'refused', 'cancelled'] as const;
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   draft: 'Черновик',
-  sent: 'Отправлен',
+  sent: 'Отправлен поставщику',
+  confirmed: 'Подтверждён поставщиком',
+  shipped: 'Отгружен',
   partial: 'Принят частично',
   received: 'Принят',
+  declined: 'Поставщик отказал',
+  refused: 'Отказ от поставки',
   cancelled: 'Отменён',
 };
 
 /** Заказы, по которым товар ещё ждём: их остаток считается «в пути». */
-export const OPEN_ORDER_STATUSES: readonly OrderStatus[] = ['sent', 'partial'];
+export const OPEN_ORDER_STATUSES: readonly OrderStatus[] = ['sent', 'confirmed', 'shipped', 'partial'];
 
 export const MAX_ORDER_LINES = 200;
 
@@ -49,10 +53,30 @@ export interface OrderDto {
   emailedAt: string | null;
   /** Почему письмо не ушло (короткая причина). */
   emailError: string | null;
+  /** Дата поставки, которую обещал поставщик в своём кабинете. */
+  deliveryOn: string | null;
+  /** Последнее сообщение поставщика. */
+  supplierNote: string | null;
+  /** Решение покупателя при приёмке: замечание или причина отказа. */
+  buyerNote: string | null;
+  /** Заказ дошёл до кабинета поставщика. */
+  portalPushedAt: string | null;
+  /** Почему заказ не дошёл до кабинета поставщика, пока пробуем снова. */
+  portalError: string | null;
+}
+
+export interface OrderEventDto {
+  id: string;
+  side: 'buyer' | 'supplier';
+  status: string;
+  text: string;
+  actor: string;
+  at: string;
 }
 
 export interface OrderDetailDto extends OrderDto {
   items: OrderLineDto[];
+  events: OrderEventDto[];
   /** Готовый текст заказа: его можно отправить поставщику в мессенджер или по почте. */
   text: string;
 }

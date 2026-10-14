@@ -36,6 +36,9 @@ export const open: { access: Access } = { access: { kind: 'public' } };
 export const asUser = (minRole: Role = 'viewer'): { access: Access } => ({ access: { kind: 'user', minRole } });
 export const asPos: { access: Access } = { access: { kind: 'pos' } };
 
+/** Пока не сменён пароль, выданный администратором, доступно только это. */
+const PASSWORD_CHANGE_ROUTES = new Set(['/api/auth/me', '/api/auth/change-password']);
+
 const API_KEY_PATTERN = /^zk_[A-Za-z0-9_-]{8}_[A-Za-z0-9_-]{32,64}$/;
 const LAST_USED_THROTTLE_MS = 60_000;
 
@@ -70,7 +73,7 @@ async function authenticateUser(deps: Deps, req: FastifyRequest): Promise<Extrac
   if (Math.floor(loaded.row.password_changed_at.getTime() / 1000) > claims.iat) {
     throw unauthorized('Сессия недействительна', 'invalid_session');
   }
-  return userPrincipal(loaded.row, loaded.locationIds) as Extract<Principal, { kind: 'user' }>;
+  return userPrincipal(loaded) as Extract<Principal, { kind: 'user' }>;
 }
 
 async function authenticateApiKey(deps: Deps, req: FastifyRequest): Promise<Principal> {
@@ -79,7 +82,7 @@ async function authenticateApiKey(deps: Deps, req: FastifyRequest): Promise<Prin
   const row = await deps.db
     .selectFrom('api_keys')
     .innerJoin('locations', 'locations.id', 'api_keys.location_id')
-    .select(['api_keys.id', 'api_keys.name', 'api_keys.location_id', 'api_keys.last_used_at', 'locations.is_active'])
+    .select(['api_keys.id', 'api_keys.name', 'api_keys.location_id', 'api_keys.last_used_at', 'locations.is_active', 'locations.org_id'])
     .where('api_keys.key_hash', '=', sha256Hex(key))
     .where('api_keys.revoked_at', 'is', null)
     .executeTakeFirst();
@@ -89,7 +92,7 @@ async function authenticateApiKey(deps: Deps, req: FastifyRequest): Promise<Prin
   if (!row.last_used_at || now.getTime() - row.last_used_at.getTime() > LAST_USED_THROTTLE_MS) {
     await deps.db.updateTable('api_keys').set({ last_used_at: now }).where('id', '=', row.id).execute();
   }
-  return { kind: 'apikey', id: row.id, name: row.name, locationIds: [row.location_id] };
+  return { kind: 'apikey', id: row.id, name: row.name, orgId: row.org_id, locationIds: [row.location_id] };
 }
 
 /**
@@ -119,6 +122,9 @@ export const accessPlugin = fp<{ deps: Deps }>(async (app: FastifyInstance, { de
       }
       const principal = await authenticateUser(deps, req);
       if (!hasRole(principal.role, access.minRole)) throw forbidden();
+      if (principal.mustChangePassword && !PASSWORD_CHANGE_ROUTES.has(route.url)) {
+        throw forbidden('Сначала смените временный пароль', 'password_change_required');
+      }
       req.principal = principal;
     };
 

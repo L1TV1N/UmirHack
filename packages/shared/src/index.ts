@@ -14,3 +14,4 @@ export * from './forecast';
 export * from './calendar';
 export * from './haccp';
 export * from './exchange';
+export * from './platform';

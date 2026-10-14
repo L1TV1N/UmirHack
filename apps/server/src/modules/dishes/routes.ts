@@ -5,11 +5,12 @@ import type { Db } from '../../db/client';
 import type { Database } from '../../db/types';
 import type { Deps } from '../../lib/context';
 import { badRequest, conflict, notFound, PG_UNIQUE_VIOLATION, pgCode, pgConstraint } from '../../lib/errors';
+import { orgOf } from '../../lib/scope';
 import { asUser, requirePrincipal } from '../../plugins/access';
 import { writeAudit } from '../audit/audit';
 
-export async function loadDishes(db: Db, ids?: string[]): Promise<DishDto[]> {
-  let q = db.selectFrom('dishes').selectAll().orderBy('name');
+export async function loadDishes(db: Db, org: string, ids?: string[]): Promise<DishDto[]> {
+  let q = db.selectFrom('dishes').selectAll().where('org_id', '=', org).orderBy('name');
   if (ids) q = q.where('id', 'in', ids.length ? ids : ['00000000-0000-0000-0000-000000000000']);
   const dishes = await q.execute();
   if (dishes.length === 0) return [];
@@ -32,9 +33,9 @@ export async function loadDishes(db: Db, ids?: string[]): Promise<DishDto[]> {
   }));
 }
 
-async function assertProducts(trx: Transaction<Database>, items: { productId: string; quantity: number }[]): Promise<void> {
+async function assertProducts(trx: Transaction<Database>, org: string, items: { productId: string; quantity: number }[]): Promise<void> {
   const ids = items.map((i) => i.productId);
-  const rows = await trx.selectFrom('products').select(['id', 'name', 'unit']).where('id', 'in', ids).where('is_active', '=', true).execute();
+  const rows = await trx.selectFrom('products').select(['id', 'name', 'unit']).where('org_id', '=', org).where('id', 'in', ids).where('is_active', '=', true).execute();
   if (rows.length !== new Set(ids).size) {
     throw badRequest('В составе есть несуществующий или отключённый продукт', [{ path: ['items'], message: 'Проверьте ингредиенты' }]);
   }
@@ -58,17 +59,17 @@ export const dishRoutes =
   async (app) => {
     const { db } = deps;
 
-    app.get('/dishes', { config: asUser() }, async () => loadDishes(db));
+    app.get('/dishes', { config: asUser() }, async (req) => loadDishes(db, orgOf(requirePrincipal(req))));
 
     app.post('/dishes', { config: asUser('manager'), schema: { body: createDishBody } }, async (req, reply) => {
       const b = req.body;
       try {
         const id = await db.transaction().execute(async (trx) => {
-          await assertProducts(trx, b.items);
+          await assertProducts(trx, orgOf(requirePrincipal(req)), b.items);
           const now = deps.clock();
           const dish = await trx
             .insertInto('dishes')
-            .values({ name: b.name, code: b.code ?? null, price: b.price, created_at: now, updated_at: now })
+            .values({ org_id: orgOf(requirePrincipal(req)), name: b.name, code: b.code ?? null, price: b.price, created_at: now, updated_at: now })
             .returning('id')
             .executeTakeFirstOrThrow();
           await trx
@@ -86,7 +87,7 @@ export const dishRoutes =
           });
           return dish.id;
         });
-        const [dto] = await loadDishes(db, [id]);
+        const [dto] = await loadDishes(db, orgOf(requirePrincipal(req)), [id]);
         return reply.status(201).send(dto);
       } catch (err) {
         duplicateDish(err);
@@ -98,7 +99,7 @@ export const dishRoutes =
       const b = req.body;
       try {
         await db.transaction().execute(async (trx) => {
-          const current = await trx.selectFrom('dishes').selectAll().where('id', '=', req.params.id).forUpdate().executeTakeFirst();
+          const current = await trx.selectFrom('dishes').selectAll().where('id', '=', req.params.id).where('org_id', '=', orgOf(requirePrincipal(req))).forUpdate().executeTakeFirst();
           if (!current) throw notFound('Блюдо');
           const now = deps.clock();
           await trx
@@ -113,7 +114,7 @@ export const dishRoutes =
             .where('id', '=', current.id)
             .execute();
           if (b.items) {
-            await assertProducts(trx, b.items);
+            await assertProducts(trx, current.org_id, b.items);
             await trx.deleteFrom('dish_items').where('dish_id', '=', current.id).execute();
             await trx
               .insertInto('dish_items')
@@ -134,7 +135,7 @@ export const dishRoutes =
         duplicateDish(err);
         throw err;
       }
-      const [dto] = await loadDishes(db, [req.params.id]);
+      const [dto] = await loadDishes(db, orgOf(requirePrincipal(req)), [req.params.id]);
       return dto;
     });
   };

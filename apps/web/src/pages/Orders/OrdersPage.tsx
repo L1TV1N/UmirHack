@@ -1,7 +1,7 @@
 import { formatMoney, formatQty, ORDER_STATUS_LABELS, type OrderDto, type OrderSuggestionDto, type OrderSuggestionLineDto, type Page } from '@zapas/shared';
 import { Mail, Plus } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { ApiError, post } from '../../api/client';
 import { useAction, useGet } from '../../api/hooks';
 import { useScope } from '../../auth/ScopeProvider';
@@ -94,6 +94,7 @@ function Suggestion({ group, onOpen }: { group: OrderSuggestionDto; onOpen: (id:
 }
 
 export default function OrdersPage() {
+  const navigate = useNavigate();
   const scope = useScope();
   const [url, setUrl] = useUrlState({ tab: 'suggest', filter: 'open', offset: '0' });
   const tab: Tab = url.tab === 'orders' ? 'orders' : 'suggest';
@@ -189,7 +190,7 @@ export default function OrdersPage() {
         </Panel>
       )}
 
-      <OrderDialog orderId={openId} onClose={() => setOpenId(null)} />
+      <OrderDialog orderId={openId} onClose={() => setOpenId(null)} onReceive={(id) => navigate(`/operations?tab=receipt&order=${id}`)} />
     </>
   );
 }

@@ -16,6 +16,7 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { Deps } from '../../lib/context';
 import { encryptSecret, randomToken } from '../../lib/crypto';
 import { conflict, forbidden, notFound, PG_FK_VIOLATION, badRequest, pgCode } from '../../lib/errors';
+import { orgOf } from '../../lib/scope';
 import { asPos, asUser, requirePrincipal, requireUser } from '../../plugins/access';
 import { writeAudit } from '../audit/audit';
 import { businessToday } from '../../lib/time';
@@ -33,20 +34,21 @@ export const integrationRoutes =
     const { db } = deps;
     const policy = deps.config.webhooks;
 
-    const loadOne = async (id: string) => {
-      const row = await db.selectFrom('webhook_endpoints').selectAll().where('id', '=', id).executeTakeFirst();
+    const loadOne = async (id: string, org: string) => {
+      const row = await db.selectFrom('webhook_endpoints').selectAll().where('org_id', '=', org).where('id', '=', id).executeTakeFirst();
       if (!row) throw notFound('Адрес');
       return row;
     };
-    const dtoOf = async (id: string): Promise<WebhookDto> => {
-      const row = await loadOne(id);
+    const dtoOf = async (id: string, org: string): Promise<WebhookDto> => {
+      const row = await loadOne(id, org);
       const loc = row.location_id ? await db.selectFrom('locations').select('name').where('id', '=', row.location_id).executeTakeFirst() : null;
       return toWebhookDto(row, loc?.name ?? null);
     };
 
-    app.get('/integrations/webhooks', { config: asUser('admin') }, async (): Promise<WebhookDto[]> => {
+    app.get('/integrations/webhooks', { config: asUser('admin') }, async (req): Promise<WebhookDto[]> => {
       const rows = await db
         .selectFrom('webhook_endpoints as e')
+        .where('e.org_id', '=', orgOf(requireUser(req)))
         .leftJoin('locations as l', 'l.id', 'e.location_id')
         .selectAll('e')
         .select('l.name as location_name')
@@ -59,7 +61,7 @@ export const integrationRoutes =
       const principal = requireUser(req);
       const b = req.body;
       const url = assertWebhookUrl(b.url, policy);
-      const count = await db.selectFrom('webhook_endpoints').select((eb) => eb.fn.countAll<string>().as('n')).executeTakeFirstOrThrow();
+      const count = await db.selectFrom('webhook_endpoints').select((eb) => eb.fn.countAll<string>().as('n')).where('org_id', '=', orgOf(principal)).executeTakeFirstOrThrow();
       if (Number(count.n) >= WEBHOOK_MAX_ENDPOINTS) throw conflict(`Адресов не больше ${WEBHOOK_MAX_ENDPOINTS}`, undefined, 'too_many_webhooks');
       const secret = newSecret();
       const now = deps.clock();
@@ -68,6 +70,7 @@ export const integrationRoutes =
           const row = await trx
             .insertInto('webhook_endpoints')
             .values({
+              org_id: orgOf(principal),
               name: b.name,
               url: url.toString(),
               secret_enc: encryptSecret(deps.config.jwtSecret, secret),
@@ -84,7 +87,7 @@ export const integrationRoutes =
         });
         // запоминаем, каким был стоп-лист к этому моменту: событием станет только то, что изменится после
         await publishStopList(deps, null).catch((err) => deps.log.error({ err }, 'не удалось запомнить состояние стоп-листа для вебхука'));
-        const dto: WebhookCreatedDto = { ...(await dtoOf(id)), secret };
+        const dto: WebhookCreatedDto = { ...(await dtoOf(id, orgOf(principal))), secret };
         return reply.status(201).send(dto);
       } catch (err) {
         if (pgCode(err) === PG_FK_VIOLATION) throw badRequest('Точка не найдена', [{ path: ['locationId'], message: 'Не найдена' }]);
@@ -99,7 +102,7 @@ export const integrationRoutes =
       const now = deps.clock();
       try {
         await db.transaction().execute(async (trx) => {
-          const current = await trx.selectFrom('webhook_endpoints').select(['id', 'url', 'enabled']).where('id', '=', req.params.id).forUpdate().executeTakeFirst();
+          const current = await trx.selectFrom('webhook_endpoints').select(['id', 'url', 'enabled']).where('org_id', '=', orgOf(principal)).where('id', '=', req.params.id).forUpdate().executeTakeFirst();
           if (!current) throw notFound('Адрес');
           await trx
             .updateTable('webhook_endpoints')
@@ -129,7 +132,7 @@ export const integrationRoutes =
         if (pgCode(err) === PG_FK_VIOLATION) throw badRequest('Точка не найдена', [{ path: ['locationId'], message: 'Не найдена' }]);
         throw err;
       }
-      return dtoOf(req.params.id);
+      return dtoOf(req.params.id, orgOf(principal));
     });
 
     app.post('/integrations/webhooks/:id/rotate-secret', { config: asUser('admin'), schema: { params: idParam } }, async (req) => {
@@ -153,7 +156,7 @@ export const integrationRoutes =
       const principal = requireUser(req);
       const now = deps.clock();
       await db.transaction().execute(async (trx) => {
-        const row = await trx.selectFrom('webhook_endpoints').select(['id', 'name', 'url']).where('id', '=', req.params.id).forUpdate().executeTakeFirst();
+        const row = await trx.selectFrom('webhook_endpoints').select(['id', 'name', 'url']).where('org_id', '=', orgOf(principal)).where('id', '=', req.params.id).forUpdate().executeTakeFirst();
         if (!row) throw notFound('Адрес');
         await trx.deleteFrom('webhook_endpoints').where('id', '=', row.id).execute();
         await writeAudit(trx, { action: 'webhook.delete', entity: 'webhook', entityId: row.id, principal, meta: req.meta, at: now, details: { name: row.name, host: new URL(row.url).host } });
@@ -163,21 +166,21 @@ export const integrationRoutes =
 
     // Проверка связи: одно событие «ping», один заход, результат сразу в ответе
     app.post('/integrations/webhooks/:id/test', { config: asUser('admin'), schema: { params: idParam } }, async (req): Promise<WebhookDeliveryDto> => {
-      await loadOne(req.params.id);
+      await loadOne(req.params.id, orgOf(requireUser(req)));
       return sendPing(deps, req.params.id);
     });
 
     // Первая синхронизация приёмника: текущее состояние стоп-листа по каждой точке, которую он слушает
     app.post('/integrations/webhooks/:id/sync', { config: asUser('admin'), schema: { params: idParam } }, async (req) => {
       const principal = requireUser(req);
-      const row = await loadOne(req.params.id);
+      const row = await loadOne(req.params.id, orgOf(requireUser(req)));
       const queued = await enqueueFullState(deps, row);
       await writeAudit(db, { action: 'webhook.sync', entity: 'webhook', entityId: row.id, principal, meta: req.meta, at: deps.clock(), details: { queued } });
       return { queued };
     });
 
     app.get('/integrations/webhooks/:id/deliveries', { config: asUser('admin'), schema: { params: idParam, querystring: deliveriesQuery } }, async (req): Promise<WebhookDeliveryDto[]> => {
-      await loadOne(req.params.id);
+      await loadOne(req.params.id, orgOf(requireUser(req)));
       const rows = await db
         .selectFrom('webhook_deliveries')
         .select(['id', 'event', 'status', 'attempts', 'last_status', 'last_error', 'created_at', 'delivered_at', 'next_attempt_at'])
@@ -212,8 +215,9 @@ export const integrationRoutes =
     app.get('/pos/products', { config: asPos, schema: { querystring: posProductsQuery } }, async (req): Promise<Page<PosProductDto>> => {
       const locationId = posLocation(req);
       const { limit, offset } = req.query;
-      const total = await db.selectFrom('products').select((eb) => eb.fn.countAll<string>().as('n')).executeTakeFirstOrThrow();
-      const rows = await db.selectFrom('products').select(['id', 'sku', 'barcode', 'name', 'unit', 'price', 'sellable', 'is_active']).orderBy('sku').limit(limit).offset(offset).execute();
+      const orgId = (await db.selectFrom('locations').select('org_id').where('id', '=', locationId).executeTakeFirstOrThrow()).org_id;
+      const total = await db.selectFrom('products').select((eb) => eb.fn.countAll<string>().as('n')).where('org_id', '=', orgId).executeTakeFirstOrThrow();
+      const rows = await db.selectFrom('products').select(['id', 'sku', 'barcode', 'name', 'unit', 'price', 'sellable', 'is_active']).where('org_id', '=', orgId).orderBy('sku').limit(limit).offset(offset).execute();
       const markdowns = await nextMarkdowns(db, locationId, businessToday(deps), rows.map((r) => r.id));
       return {
         items: rows.map((r) => ({ sku: r.sku, barcode: r.barcode, name: r.name, unit: r.unit, price: Number(r.price), markdown: markdowns.get(r.id) ?? null, sellable: r.sellable, isActive: r.is_active })),

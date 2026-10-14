@@ -58,6 +58,9 @@ const schema = z.object({
   EXCHANGE_ALLOW_HOSTS: z.string().default(''),
 
   // Фото накладной читает GigaChat. Без ключа кнопки с фото нет, а УПД в XML грузится всегда
+  SUPPLIER_PORTAL_URL: z.string().optional(),
+  SUPPLIER_PORTAL_SECRET: z.string().optional(),
+  SUPPLIER_PORTAL_PUBLIC_URL: z.string().optional(),
   GIGACHAT_AUTH_KEY: z.string().optional(),
   GIGACHAT_SCOPE: z.string().default('GIGACHAT_API_PERS'),
   INVOICE_MODEL: z.string().default('GigaChat-2-Max'),
@@ -91,6 +94,8 @@ export interface Config {
   stopListSyncDelayMs: number;
   /** commands: бот отвечает на команды (опрос Telegram). Выключается, если опрос ведёт другой экземпляр. */
   telegram: { token: string; chatId: string; commands: boolean; proxy: string | null } | null;
+  /** Кабинет поставщика «Отгрузка». Нет: заказы остаются только в «Запасе». */
+  supplierPortal: { url: string; secret: string; publicUrl: string } | null;
   invoicePhoto: { authKey: string; scope: string; model: string; caFile: string | null; insecureTls: boolean } | null;
   webhooks: { allowPrivate: boolean; allowHttp: boolean };
   /** Хосты, которым разрешён обмен по http и во внутренней сети. */
@@ -105,6 +110,11 @@ export interface Config {
 export function loadEnvFile(env: string | undefined = process.env.NODE_ENV): void {
   const file = resolve(process.cwd(), env === 'test' ? '.env.test' : '.env');
   if (existsSync(file)) process.loadEnvFile(file);
+}
+
+function portalSecretOk(secret: string): true {
+  if (secret.length < 16) throw new Error('SUPPLIER_PORTAL_SECRET короче 16 символов: подпись запросов между «Запасом» и кабинетом поставщика была бы слабой');
+  return true;
 }
 
 function assertTimeZone(tz: string): void {
@@ -191,6 +201,10 @@ export function parseConfig(source: NodeJS.ProcessEnv = process.env): Config {
     smtp: e.SMTP_URL && e.SMTP_FROM ? { url: e.SMTP_URL, from: e.SMTP_FROM } : null,
     webhooks: { allowPrivate: e.WEBHOOK_ALLOW_PRIVATE, allowHttp: e.WEBHOOK_ALLOW_HTTP ?? !production },
     exchange: { allowHosts: e.EXCHANGE_ALLOW_HOSTS.split(',').map((h) => h.trim()).filter(Boolean) },
+    supplierPortal:
+      e.SUPPLIER_PORTAL_URL && e.SUPPLIER_PORTAL_SECRET && portalSecretOk(e.SUPPLIER_PORTAL_SECRET)
+        ? { url: e.SUPPLIER_PORTAL_URL, secret: e.SUPPLIER_PORTAL_SECRET, publicUrl: e.SUPPLIER_PORTAL_PUBLIC_URL || e.SUPPLIER_PORTAL_URL }
+        : null,
     invoicePhoto: e.GIGACHAT_AUTH_KEY
       ? { authKey: e.GIGACHAT_AUTH_KEY, scope: e.GIGACHAT_SCOPE, model: e.INVOICE_MODEL, caFile: e.GIGACHAT_CA_FILE || null, insecureTls: e.GIGACHAT_INSECURE_TLS }
       : null,

@@ -33,6 +33,16 @@ export interface UserDto {
   lastLoginAt: string | null;
   lockedUntil: string | null;
   createdAt: string;
+  organizationId: string;
+  /** Известно в ответах на вход и /auth/me. */
+  organizationName: string | null;
+  /** Пароль выдан администратором: нужно сменить его при первом входе. */
+  mustChangePassword: boolean;
+}
+
+/** Ответ на создание пользователя: временный пароль виден только здесь и только один раз. */
+export interface CreatedUserDto extends UserDto {
+  temporaryPassword: string | null;
 }
 
 export interface SessionDto {

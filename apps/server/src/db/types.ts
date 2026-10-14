@@ -11,10 +11,12 @@ type DateOnlyNullable = ColumnType<string | null, string | null | undefined, str
 
 export interface UsersTable {
   id: Generated<string>;
+  org_id: Generated<string>;
+  must_change_password: Generated<boolean>;
   email: string;
   full_name: string;
   password_hash: string;
-  role: 'admin' | 'manager' | 'storekeeper' | 'viewer';
+  role: 'admin' | 'manager' | 'storekeeper' | 'viewer' | 'waiter';
   is_active: Generated<boolean>;
   failed_attempts: Generated<number>;
   locked_until: TimestampNullable;
@@ -42,9 +44,10 @@ export interface TelegramLinkCodesTable {
 
 export interface LocationsTable {
   id: Generated<string>;
+  org_id: Generated<string>;
   code: string;
   name: string;
-  kind: 'warehouse' | 'kitchen' | 'shop';
+  kind: 'warehouse' | 'kitchen' | 'shop' | 'cafe' | 'bar';
   address: string | null;
   latitude: ColumnType<string | null, number | string | null | undefined, number | string | null>;
   longitude: ColumnType<string | null, number | string | null | undefined, number | string | null>;
@@ -86,6 +89,7 @@ export interface ApiKeysTable {
 
 export interface CategoriesTable {
   id: Generated<string>;
+  org_id: Generated<string>;
   name: string;
 }
 
@@ -123,6 +127,7 @@ export interface SupplierItemMapTable {
 
 export interface SuppliersTable {
   id: Generated<string>;
+  org_id: Generated<string>;
   name: string;
   inn: string | null;
   phone: string | null;
@@ -136,6 +141,7 @@ export interface SuppliersTable {
 
 export interface ProductsTable {
   id: Generated<string>;
+  org_id: Generated<string>;
   sku: string;
   barcode: string | null;
   name: string;
@@ -157,6 +163,7 @@ export interface ProductsTable {
 
 export interface DishesTable {
   id: Generated<string>;
+  org_id: Generated<string>;
   name: string;
   code: string | null;
   price: Numeric;
@@ -288,6 +295,7 @@ export interface AuditLogTable {
   entity_id: string | null;
   ip: string | null;
   user_agent: string | null;
+  org_id: string | null;
   details: ColumnType<unknown, string, string>;
   prev_hash: string;
   hash: string;
@@ -398,7 +406,7 @@ export interface PurchaseOrdersTable {
   number: string;
   supplier_id: string;
   location_id: string;
-  status: Generated<'draft' | 'sent' | 'partial' | 'received' | 'cancelled'>;
+  status: Generated<'draft' | 'sent' | 'confirmed' | 'shipped' | 'partial' | 'received' | 'declined' | 'refused' | 'cancelled'>;
   expected_on: DateOnlyNullable;
   comment: string | null;
   total: ColumnType<string, number | string | undefined, number | string>;
@@ -410,6 +418,82 @@ export interface PurchaseOrdersTable {
   closed_at: TimestampNullable;
   emailed_at: TimestampNullable;
   email_error: string | null;
+  delivery_on: DateOnlyNullable;
+  supplier_note: string | null;
+  buyer_note: string | null;
+  portal_pushed_at: TimestampNullable;
+  portal_error: string | null;
+}
+
+export interface PurchaseOrderEventsTable {
+  id: Generated<string>;
+  seq: Generated<string>;
+  order_id: string;
+  side: 'buyer' | 'supplier';
+  status: string;
+  text: string;
+  actor: string;
+  created_at: Timestamp;
+}
+
+export interface OrganizationsTable {
+  id: Generated<string>;
+  name: string;
+  created_at: Generated<Date>;
+}
+
+export interface GuestOrdersTable {
+  id: Generated<string>;
+  number: string;
+  location_id: string;
+  table_label: string;
+  waiter_id: string;
+  status: Generated<'new' | 'in_progress' | 'served' | 'cancelled'>;
+  comment: string | null;
+  document_id: string | null;
+  cancel_reason: string | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+  accepted_at: TimestampNullable;
+  served_at: TimestampNullable;
+  cancelled_at: TimestampNullable;
+}
+
+export interface GuestOrderLinesTable {
+  id: Generated<string>;
+  order_id: string;
+  dish_id: string;
+  quantity: number;
+  price: Numeric;
+  note: string | null;
+  is_remake: Generated<boolean>;
+}
+
+export interface GuestOrderIncidentsTable {
+  id: Generated<string>;
+  order_id: string;
+  line_id: string | null;
+  kind: 'dropped' | 'wrong_dish' | 'complaint' | 'kitchen_defect' | 'other';
+  blame: 'waiter' | 'kitchen' | 'guest' | 'venue';
+  comment: string;
+  status: Generated<'reported' | 'remade' | 'dismissed'>;
+  reported_by: string;
+  reported_at: Timestamp;
+  resolved_by: string | null;
+  resolved_at: TimestampNullable;
+  resolution_comment: string | null;
+  writeoff_document_id: string | null;
+  loss_cost: ColumnType<string | null, number | string | null | undefined, number | string | null>;
+}
+
+export interface GuestOrderEventsTable {
+  id: Generated<string>;
+  seq: Generated<string>;
+  order_id: string;
+  kind: string;
+  text: string;
+  actor: string;
+  created_at: Timestamp;
 }
 
 export interface PurchaseOrderLinesTable {
@@ -422,6 +506,7 @@ export interface PurchaseOrderLinesTable {
 
 export interface WebhookEndpointsTable {
   id: Generated<string>;
+  org_id: Generated<string>;
   name: string;
   url: string;
   secret_enc: string;
@@ -459,6 +544,7 @@ export interface StoplistPublishedTable {
 
 export interface ExternalSystemsTable {
   id: Generated<string>;
+  org_id: Generated<string>;
   kind: 'onec' | 'iiko';
   name: string;
   base_url: string;
@@ -545,6 +631,12 @@ export interface Database {
   shortage_episodes: ShortageEpisodesTable;
   sale_refusals: SaleRefusalsTable;
   demand_outlook: DemandOutlookTable;
+  organizations: OrganizationsTable;
+  guest_orders: GuestOrdersTable;
+  guest_order_lines: GuestOrderLinesTable;
+  guest_order_incidents: GuestOrderIncidentsTable;
+  guest_order_events: GuestOrderEventsTable;
+  purchase_order_events: PurchaseOrderEventsTable;
   purchase_orders: PurchaseOrdersTable;
   purchase_order_lines: PurchaseOrderLinesTable;
   webhook_endpoints: WebhookEndpointsTable;

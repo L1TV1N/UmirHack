@@ -136,3 +136,26 @@
     min-width: 220px;
   }
 }
+
+.timeline {
+  list-style: none;
+  margin: 18px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  font-size: 14px;
+
+  li {
+    padding-left: 12px;
+    border-left: 3px solid var(--line);
+  }
+
+  time {
+    color: var(--ink-500);
+    margin-right: 4px;
+  }
+}
+
+.fromSupplier {
+  border-left-color: var(--brand-400);
+}

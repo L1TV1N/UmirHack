@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactNode } from 'react';
+import type { AnchorHTMLAttributes, ButtonHTMLAttributes, ReactNode } from 'react';
 import { Link, type LinkProps } from 'react-router';
 import styles from './Button.module.scss';
 
@@ -31,6 +31,23 @@ export function Button({
       {loading ? <span className={styles.spinner} aria-hidden="true" /> : icon}
       {children}
     </button>
+  );
+}
+
+/** Обычная ссылка, оформленная как кнопка: для адресов вне приложения, открывается в новой вкладке. */
+export function ExternalButton({
+  variant = 'secondary',
+  size = 'md',
+  icon,
+  children,
+  className,
+  ...rest
+}: Omit<Common, 'loading'> & AnchorHTMLAttributes<HTMLAnchorElement>) {
+  return (
+    <a target="_blank" rel="noopener noreferrer" {...rest} className={cls(variant, size, className)}>
+      {icon}
+      {children}
+    </a>
   );
 }
 

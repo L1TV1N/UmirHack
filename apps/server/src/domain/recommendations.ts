@@ -6,6 +6,7 @@ import {
   formatNumber,
   formatQty,
   fromMilli,
+  servesDishes,
   type LocationKind,
   type RecommendationDto,
   type Unit,
@@ -29,6 +30,13 @@ export interface RecLocation {
   name: string;
   kind: LocationKind;
   isActive: boolean;
+  /** Организация точки. Блюда другой организации на ней не готовятся. */
+  orgId?: string;
+}
+
+/** Блюдо видно на точке, если обе стороны из одной организации (или организация неизвестна, как в тестах). */
+export function dishVisibleAt(dish: { orgId?: string }, location: { orgId?: string }): boolean {
+  return !dish.orgId || !location.orgId || dish.orgId === location.orgId;
 }
 
 export interface RecBatch {
@@ -51,6 +59,7 @@ export interface RecVelocity {
 export interface RecDish {
   id: string;
   name: string;
+  orgId?: string;
   items: { productId: string; qtyMilli: number }[];
 }
 
@@ -316,9 +325,9 @@ export function draftRecommendations(input: RecInput): Draft[] {
     }
 
     // ингредиент под угрозой: предложить блюда, в которых он используется
-    if (location.kind === 'kitchen' && promoteAtRisk > 0) {
+    if (servesDishes(location.kind) && promoteAtRisk > 0) {
       const dishes = input.dishes
-        .filter((d) => d.items.some((i) => i.productId === product.id))
+        .filter((d) => dishVisibleAt(d, location) && d.items.some((i) => i.productId === product.id))
         .map((d) => ({ dish: d, portions: portionsPossible(d, location.id, stock) }))
         .filter((x) => x.portions > 0)
         .sort((a, b) => b.portions - a.portions)

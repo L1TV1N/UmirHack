@@ -15,6 +15,7 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { CategoriesTable, ProductsTable, SuppliersTable } from '../../db/types';
 import type { Deps } from '../../lib/context';
 import { badRequest, conflict, notFound, pgCode, pgConstraint, PG_FK_VIOLATION, PG_UNIQUE_VIOLATION } from '../../lib/errors';
+import { orgOf } from '../../lib/scope';
 import { asUser, requirePrincipal } from '../../plugins/access';
 import { writeAudit } from '../audit/audit';
 
@@ -67,9 +68,10 @@ export const catalogRoutes =
   async (app) => {
     const { db } = deps;
 
-    const productSelect = () =>
+    const productSelect = (org: string) =>
       db
         .selectFrom('products')
+        .where('products.org_id', '=', org)
         .innerJoin('categories', 'categories.id', 'products.category_id')
         .leftJoin('suppliers', 'suppliers.id', 'products.default_supplier_id')
         .selectAll('products')
@@ -93,12 +95,13 @@ export const catalogRoutes =
     /** Поставщик по умолчанию должен быть действующим, а фасовка штучного товара целой. */
     async function assertOrderSettings(
       trx: typeof db,
+      org: string,
       unit: 'kg' | 'l' | 'pcs',
       packSize: number | undefined,
       supplierId: string | null | undefined,
     ): Promise<void> {
       if (supplierId) {
-        const s = await trx.selectFrom('suppliers').select('id').where('id', '=', supplierId).where('is_active', '=', true).executeTakeFirst();
+        const s = await trx.selectFrom('suppliers').select('id').where('org_id', '=', org).where('id', '=', supplierId).where('is_active', '=', true).executeTakeFirst();
         if (!s) throw badRequest('Поставщик не найден или отключён', [{ path: ['defaultSupplierId'], message: 'Недоступен для заказов' }]);
       }
       if (unit === 'pcs' && packSize !== undefined && !Number.isInteger(packSize)) {
@@ -108,14 +111,19 @@ export const catalogRoutes =
 
     // Категории
 
-    app.get('/categories', { config: asUser() }, async () =>
-      (await db.selectFrom('categories').selectAll().orderBy('name').execute()).map(toCategoryDto),
+    async function assertCategory(trx: typeof db, org: string, categoryId: string): Promise<void> {
+      const c = await trx.selectFrom('categories').select('id').where('org_id', '=', org).where('id', '=', categoryId).executeTakeFirst();
+      if (!c) throw badRequest('Категория не найдена', [{ path: ['categoryId'], message: 'Не найдена' }]);
+    }
+
+    app.get('/categories', { config: asUser() }, async (req) =>
+      (await db.selectFrom('categories').selectAll().where('org_id', '=', orgOf(requirePrincipal(req))).orderBy('name').execute()).map(toCategoryDto),
     );
 
     app.post('/categories', { config: asUser('manager'), schema: { body: categoryBody } }, async (req, reply) => {
       try {
         const row = await db.transaction().execute(async (trx) => {
-          const created = await trx.insertInto('categories').values({ name: req.body.name }).returningAll().executeTakeFirstOrThrow();
+          const created = await trx.insertInto('categories').values({ org_id: orgOf(requirePrincipal(req)), name: req.body.name }).returningAll().executeTakeFirstOrThrow();
           await writeAudit(trx, {
             action: 'category.create',
             entity: 'category',
@@ -141,6 +149,7 @@ export const catalogRoutes =
             .updateTable('categories')
             .set({ name: req.body.name })
             .where('id', '=', req.params.id)
+            .where('org_id', '=', orgOf(requirePrincipal(req)))
             .returningAll()
             .executeTakeFirst();
           if (!row) throw notFound('Категория');
@@ -163,8 +172,8 @@ export const catalogRoutes =
 
     // Поставщики
 
-    app.get('/suppliers', { config: asUser() }, async () =>
-      (await db.selectFrom('suppliers').selectAll().orderBy('name').execute()).map(toSupplierDto),
+    app.get('/suppliers', { config: asUser() }, async (req) =>
+      (await db.selectFrom('suppliers').selectAll().where('org_id', '=', orgOf(requirePrincipal(req))).orderBy('name').execute()).map(toSupplierDto),
     );
 
     app.post('/suppliers', { config: asUser('manager'), schema: { body: supplierBody } }, async (req, reply) => {
@@ -173,6 +182,7 @@ export const catalogRoutes =
           const created = await trx
             .insertInto('suppliers')
             .values({
+              org_id: orgOf(requirePrincipal(req)),
               name: req.body.name,
               inn: req.body.inn || null,
               phone: req.body.phone ?? null,
@@ -223,6 +233,7 @@ export const catalogRoutes =
               ...(req.body.isActive !== undefined ? { is_active: req.body.isActive } : {}),
             })
             .where('id', '=', req.params.id)
+            .where('org_id', '=', orgOf(requirePrincipal(req)))
             .returningAll()
             .executeTakeFirst();
           if (!row) throw notFound('Поставщик');
@@ -253,6 +264,7 @@ export const catalogRoutes =
       const like = q ? likePattern(q) : '';
       const filtered = db
         .selectFrom('products')
+        .where('products.org_id', '=', orgOf(requirePrincipal(req)))
         .innerJoin('categories', 'categories.id', 'products.category_id')
         .leftJoin('suppliers', 'suppliers.id', 'products.default_supplier_id')
         .$if(Boolean(q), (qb) =>
@@ -277,7 +289,7 @@ export const catalogRoutes =
 
     // Продукты по штрихкоду. Сравниваются выровненные до 14 знаков значения: EAN-13, UPC-A и GTIN-14 одного товара совпадают.
     app.get('/products/by-barcode/:code', { config: asUser(), schema: { params: barcodeParam } }, async (req) => {
-      const row = await productSelect()
+      const row = await productSelect(orgOf(requirePrincipal(req)))
         .where(sql<boolean>`lpad(products.barcode, 14, '0') = lpad(${req.params.code}, 14, '0')`)
         .orderBy('products.is_active', 'desc')
         .orderBy('products.name')
@@ -287,8 +299,8 @@ export const catalogRoutes =
     });
 
     // Каталог для сканера без связи: активные продукты со штрихкодом. Телефон хранит его на время работы.
-    app.get('/products/scan-index', { config: asUser() }, async () => {
-      const rows = await productSelect()
+    app.get('/products/scan-index', { config: asUser() }, async (req) => {
+      const rows = await productSelect(orgOf(requirePrincipal(req)))
         .where('products.is_active', '=', true)
         .where('products.barcode', 'is not', null)
         .orderBy('products.name')
@@ -298,7 +310,7 @@ export const catalogRoutes =
     });
 
     app.get('/products/:id', { config: asUser(), schema: { params: idParam } }, async (req) => {
-      const row = await productSelect().where('products.id', '=', req.params.id).executeTakeFirst();
+      const row = await productSelect(orgOf(requirePrincipal(req))).where('products.id', '=', req.params.id).executeTakeFirst();
       if (!row) throw notFound('Продукт');
       return toProductDto(row);
     });
@@ -308,10 +320,13 @@ export const catalogRoutes =
       try {
         const id = await db.transaction().execute(async (trx) => {
           const now = deps.clock();
-          await assertOrderSettings(trx as unknown as typeof db, b.unit, b.packSize, b.defaultSupplierId);
+          const org = orgOf(requirePrincipal(req));
+          await assertCategory(trx as unknown as typeof db, org, b.categoryId);
+          await assertOrderSettings(trx as unknown as typeof db, org, b.unit, b.packSize, b.defaultSupplierId);
           const created = await trx
             .insertInto('products')
             .values({
+              org_id: org,
               sku: b.sku,
               barcode: b.barcode ?? null,
               name: b.name,
@@ -342,7 +357,7 @@ export const catalogRoutes =
           });
           return created.id;
         });
-        const row = await productSelect().where('products.id', '=', id).executeTakeFirstOrThrow();
+        const row = await productSelect(orgOf(requirePrincipal(req))).where('products.id', '=', id).executeTakeFirstOrThrow();
         return reply.status(201).send(toProductDto(row));
       } catch (err) {
         return duplicateProduct(err);
@@ -353,7 +368,7 @@ export const catalogRoutes =
       const b = req.body;
       try {
         await db.transaction().execute(async (trx) => {
-          const current = await trx.selectFrom('products').selectAll().where('id', '=', req.params.id).forUpdate().executeTakeFirst();
+          const current = await trx.selectFrom('products').selectAll().where('id', '=', req.params.id).where('org_id', '=', orgOf(requirePrincipal(req))).forUpdate().executeTakeFirst();
           if (!current) throw notFound('Продукт');
 
           if (b.unit !== undefined && b.unit !== current.unit) {
@@ -362,7 +377,7 @@ export const catalogRoutes =
           }
 
           const now = deps.clock();
-          await assertOrderSettings(trx as unknown as typeof db, b.unit ?? current.unit, b.packSize ?? (b.unit !== undefined ? Number(current.pack_size) : undefined), b.defaultSupplierId);
+          await assertOrderSettings(trx as unknown as typeof db, current.org_id, b.unit ?? current.unit, b.packSize ?? (b.unit !== undefined ? Number(current.pack_size) : undefined), b.defaultSupplierId);
           await trx
             .updateTable('products')
             .set({
@@ -401,7 +416,7 @@ export const catalogRoutes =
       } catch (err) {
         return duplicateProduct(err);
       }
-      const row = await productSelect().where('products.id', '=', req.params.id).executeTakeFirstOrThrow();
+      const row = await productSelect(orgOf(requirePrincipal(req))).where('products.id', '=', req.params.id).executeTakeFirstOrThrow();
       return toProductDto(row);
     });
   };

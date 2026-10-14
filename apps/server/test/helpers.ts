@@ -1,4 +1,4 @@
-import type { Role } from '@zapas/shared';
+import { DEFAULT_ORG_ID, DEFAULT_ORG_NAME, type Role } from '@zapas/shared';
 import type { FastifyInstance, InjectOptions } from 'fastify';
 import { sql } from 'kysely';
 import { buildApp } from '../src/app';
@@ -17,6 +17,8 @@ import { hashPassword } from '../src/modules/auth/password';
 import type { BotCommand, Buttons, TelegramApi, TelegramUpdate } from '../src/modules/telegram/api';
 import { TelegramBot } from '../src/modules/telegram/bot';
 import type { InvoiceReader } from '../src/modules/invoices/reader';
+import type { SupplierPortal } from '../src/modules/supplier-portal/client';
+import type { PortalOrderPush } from '@zapas/shared';
 import type { RawInvoice } from '../src/modules/invoices/raw';
 
 /** Транспорт обмена, который тест подменяет на имитацию 1С или на отказ сети. Пока ничего не подключено, любая отправка падает. */
@@ -25,6 +27,18 @@ export class SwitchTransport implements ExchangeTransport {
   async request(req: ExchangeRequest): Promise<ExchangeResponse> {
     if (!this.current) throw Object.assign(new Error('refused'), { code: 'ECONNREFUSED' });
     return this.current.request(req);
+  }
+}
+
+/** Кабинет поставщика без сети: запоминает всё, что ему отправили. */
+export class FakePortal implements SupplierPortal {
+  readonly publicUrl = 'http://portal.test/supplier';
+  readonly pushes: PortalOrderPush[] = [];
+  failure: string | null = null;
+  async push(order: PortalOrderPush): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (this.failure) return { ok: false, error: this.failure };
+    this.pushes.push(order);
+    return { ok: true };
   }
 }
 
@@ -108,6 +122,8 @@ export interface TestEnv {
   mailer: FakeMailer;
   /** Погода без сети: отдаёт заготовленные сутки. */
   weather: FakeWeatherProvider;
+  /** Кабинет поставщика без сети. */
+  portal: FakePortal;
   /** Зависимости приложения для вызова сервисов напрямую (например, очереди вебхуков). */
   deps: Deps;
   bot: TelegramBot;
@@ -146,10 +162,11 @@ export async function createTestEnv(overrides: Record<string, string> = {}, now 
   const exchange = new SwitchTransport();
   const mailer = new FakeMailer();
   const weather = new FakeWeatherProvider();
-  const app = await buildApp({ db: appHandle.db, config, clock: () => clock.now, notifier, telegram, invoiceReader, webhookSender: webhooks, exchangeTransport: exchange, mailer, weather });
+  const portal = new FakePortal();
+  const app = await buildApp({ db: appHandle.db, config, clock: () => clock.now, notifier, telegram, invoiceReader, webhookSender: webhooks, exchangeTransport: exchange, mailer, weather, supplierPortal: portal });
   await app.ready();
 
-  const runtime: Deps = { db: appHandle.db, config, clock: () => clock.now, notifier, telegram, webhookSender: webhooks, exchangeTransport: exchange, mailer, weather, log: console };
+  const runtime: Deps = { db: appHandle.db, config, clock: () => clock.now, notifier, telegram, webhookSender: webhooks, exchangeTransport: exchange, mailer, weather, supplierPortal: portal, log: console };
   let bot = new TelegramBot(runtime, telegram);
   await bot.prepare();
   return {
@@ -164,6 +181,7 @@ export async function createTestEnv(overrides: Record<string, string> = {}, now 
     exchange,
     mailer,
     weather,
+    portal,
     deps: runtime,
     get bot() {
       return bot;
@@ -185,6 +203,7 @@ export async function createTestEnv(overrides: Record<string, string> = {}, now 
       );
       const list = rows.rows.map((r) => `"${r.tablename}"`).join(', ');
       await sql.raw(`TRUNCATE ${list} RESTART IDENTITY CASCADE`).execute(ownerHandle.db);
+      await sql`INSERT INTO organizations (id, name) VALUES (${DEFAULT_ORG_ID}, ${DEFAULT_ORG_NAME})`.execute(ownerHandle.db);
       notifier.messages.length = 0;
       telegram.sent.length = 0;
       telegram.edits.length = 0;
@@ -197,6 +216,8 @@ export async function createTestEnv(overrides: Record<string, string> = {}, now 
       mailer.sent.length = 0;
       mailer.failure = null;
       weather.reset();
+      portal.pushes.length = 0;
+      portal.failure = null;
       resetForecastCache();
       webhooks.failNext = 0;
       webhooks.failStatus = null;

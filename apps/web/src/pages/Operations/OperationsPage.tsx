@@ -7,22 +7,24 @@ import { EmptyState } from '../../components/Feedback/Feedback';
 import { PageHeader, Panel } from '../../components/Panel/Panel';
 import { Tabs } from '../../components/Tabs/Tabs';
 import { useUrlState } from '../../lib/useUrlState';
+import { GuestOrdersPanel } from './GuestOrdersPanel';
 import { Journal } from './Journal';
 import { ReceiptForm } from './ReceiptForm';
 import { SaleForm } from './SaleForm';
 import { TransferForm } from './TransferForm';
 import { WriteoffForm } from './WriteoffForm';
 
-type Tab = 'receipt' | 'sale' | 'writeoff' | 'transfer' | 'journal';
-const TABS: Tab[] = ['receipt', 'sale', 'writeoff', 'transfer', 'journal'];
+type Tab = 'receipt' | 'sale' | 'guest' | 'writeoff' | 'transfer' | 'journal';
+const TABS: Tab[] = ['receipt', 'sale', 'guest', 'writeoff', 'transfer', 'journal'];
 
 export default function OperationsPage() {
   const { can } = useAuth();
   const scope = useScope();
-  const [url, setUrl] = useUrlState({ tab: 'receipt' });
+  const [url, setUrl] = useUrlState({ tab: 'receipt', order: '' });
   const canWrite = can('storekeeper');
   const tab: Tab = TABS.includes(url.tab as Tab) ? (url.tab as Tab) : 'receipt';
-  const current: Tab = canWrite ? tab : 'journal';
+  const canGuest = can('manager');
+  const current: Tab = tab === 'guest' ? (canGuest ? 'guest' : 'journal') : canWrite ? tab : 'journal';
   const noLocations = !scope.loading && scope.activeLocations.length === 0;
 
   useEffect(() => {
@@ -31,7 +33,7 @@ export default function OperationsPage() {
 
   return (
     <>
-      <PageHeader title="Операции" subtitle="Приход, заказ гостя, списание и перемещение. Каждая операция создаёт документ и движения по партиям."
+      <PageHeader title="Операции" subtitle="Приход, заказ гостя, заявки от официантов, списание и перемещение. Каждая операция создаёт документ и движения по партиям."
         actions={can('manager') ? <LinkButton to="/testing?tab=barcodes" icon={<ScanBarcode size={16} />}>Штрихкоды для проверки</LinkButton> : undefined}
       />
       <Tabs<Tab>
@@ -47,6 +49,7 @@ export default function OperationsPage() {
                 { value: 'transfer', label: 'Перемещение' },
               ] as const)
             : []),
+          ...(canGuest ? ([{ value: 'guest', label: 'Заявки гостей' }] as const) : []),
           { value: 'journal', label: 'Журнал' },
         ]}
       />
@@ -60,8 +63,9 @@ export default function OperationsPage() {
           <EmptyState title="Нет ни одной активной точки">Операции проводятся по точкам. Администратор создаёт их в разделе «Администрирование».</EmptyState>
         ) : (
           <>
-            {current === 'receipt' && <ReceiptForm />}
+            {current === 'receipt' && <ReceiptForm presetOrder={url.order || undefined} onPresetUsed={() => setUrl({ order: '' })} />}
             {current === 'sale' && <SaleForm />}
+            {current === 'guest' && <GuestOrdersPanel />}
             {current === 'writeoff' && <WriteoffForm />}
             {current === 'transfer' && <TransferForm />}
             {current === 'journal' && <Journal />}

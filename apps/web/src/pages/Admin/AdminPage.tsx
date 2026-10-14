@@ -31,7 +31,7 @@ export default function AdminPage() {
         onChange={(v) => setUrl({ tab: v })}
         items={[
           { value: 'users', label: 'Пользователи' },
-          { value: 'locations', label: 'Точки' },
+          { value: 'locations', label: 'Заведения' },
           { value: 'settings', label: 'Параметры' },
           { value: 'forecast', label: 'Погода и календарь' },
           { value: 'keys', label: 'Кассы' },

@@ -3,6 +3,7 @@ import { sql } from 'kysely';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { Deps } from '../../lib/context';
 import { AppError, badRequest, conflict, notFound } from '../../lib/errors';
+import { orgOf } from '../../lib/scope';
 import { asUser, requireUser } from '../../plugins/access';
 import { writeAudit } from '../audit/audit';
 import { InvoiceFormatError } from './raw';
@@ -42,7 +43,7 @@ export const invoiceRoutes =
         const bytes = Buffer.from(req.body.content, 'base64');
         if (bytes.length > MAX_XML_BYTES) throw badRequest('Файл больше 3 МБ', undefined, 'invoice_too_large');
         try {
-          return await buildInvoice(deps, parseUpd(bytes), 'upd');
+          return await buildInvoice(deps, parseUpd(bytes), 'upd', orgOf(requireUser(req)));
         } catch (err) {
           if (err instanceof InvoiceFormatError) throw badRequest(err.message, undefined, 'invoice_format');
           throw err;
@@ -69,7 +70,7 @@ export const invoiceRoutes =
           throw new AppError(502, 'invoice_reader_failed', 'Не удалось распознать фото. Попробуйте ещё раз или загрузите файл УПД');
         }
         await writeAudit(db, { action: 'invoice.photo', principal: requireUser(req), meta: req.meta, at: deps.clock(), details: { bytes: image.length, lines: raw.lines.length } });
-        return buildInvoice(deps, raw, 'photo');
+        return buildInvoice(deps, raw, 'photo', orgOf(requireUser(req)));
       },
     );
 

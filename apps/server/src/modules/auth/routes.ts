@@ -1,4 +1,4 @@
-import { changePasswordBody, loginBody } from '@zapas/shared';
+import { changePasswordBody, loginBody, registerBody } from '@zapas/shared';
 import type { FastifyReply } from 'fastify';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { Deps } from '../../lib/context';
@@ -6,7 +6,7 @@ import { unauthorized } from '../../lib/errors';
 import { asUser, open, requireUser } from '../../plugins/access';
 import { assertTrustedOrigin } from '../../plugins/security';
 import { loadUser, toUserDto } from '../users/users';
-import { changePassword, login, logout, refresh, type SessionResult } from './service';
+import { changePassword, login, logout, refresh, register, type SessionResult } from './service';
 
 export const REFRESH_COOKIE = 'zapas_rt';
 
@@ -38,6 +38,16 @@ export const authRoutes =
       },
     );
 
+    app.post(
+      '/auth/register',
+      { config: { ...open, rateLimit: { max: deps.config.loginRateLimitMax, timeWindow: '1 minute' } }, schema: { body: registerBody } },
+      async (req, reply) => {
+        assertTrustedOrigin(req, deps.config);
+        void reply.status(201);
+        return respond(reply, await register(deps, req.body, req.meta));
+      },
+    );
+
     app.post('/auth/refresh', { config: { ...open, rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req, reply) => {
       assertTrustedOrigin(req, deps.config);
       const token = req.cookies[REFRESH_COOKIE];
@@ -59,17 +69,17 @@ export const authRoutes =
       return reply.status(204).send();
     });
 
-    app.get('/auth/me', { config: asUser() }, async (req) => {
+    app.get('/auth/me', { config: asUser('waiter') }, async (req) => {
       const principal = requireUser(req);
       const loaded = await loadUser(deps.db, principal.id);
       if (!loaded) throw unauthorized();
-      return toUserDto(loaded.row, loaded.locationIds);
+      return toUserDto(loaded.row, loaded.locationIds, deps.clock(), loaded.organizationName);
     });
 
     app.post(
       '/auth/change-password',
       {
-        config: { ...asUser(), rateLimit: { max: 5, timeWindow: '1 minute' } },
+        config: { ...asUser('waiter'), rateLimit: { max: 5, timeWindow: '1 minute' } },
         schema: { body: changePasswordBody },
       },
       async (req, reply) => {

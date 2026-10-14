@@ -44,6 +44,9 @@ services:
       GIGACHAT_SCOPE: ${GIGACHAT_SCOPE:-GIGACHAT_API_PERS}
       INVOICE_MODEL: ${INVOICE_MODEL:-GigaChat-2-Max}
       GIGACHAT_INSECURE_TLS: ${GIGACHAT_INSECURE_TLS:-false}
+      SUPPLIER_PORTAL_URL: ${SUPPLIER_PORTAL_URL:-http://supplier:3100/supplier}
+      SUPPLIER_PORTAL_SECRET: ${SUPPLIER_PORTAL_SECRET:-}
+      SUPPLIER_PORTAL_PUBLIC_URL: ${SUPPLIER_PORTAL_PUBLIC_URL:-}
     ports:
       - "127.0.0.1:${APP_PORT:-3000}:3000"
     read_only: true
@@ -53,6 +56,80 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+
+  # Отгрузка: кабинет поставщика. Отдельная система со своей базой и своими пользователями: обменивается с «Запасом» заказами по HTTP.
+  supplier:
+    build: .
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3100
+      BASE_PATH: /supplier
+      WEB_DIST: /app/apps/supplier/dist/web
+      SUPPLIER_DB_FILE: /data/supplier.db
+      SUPPLIER_SESSION_SECRET: ${SUPPLIER_SESSION_SECRET:?Задайте SUPPLIER_SESSION_SECRET в .env}
+      SUPPLIER_PORTAL_SECRET: ${SUPPLIER_PORTAL_SECRET:?Задайте SUPPLIER_PORTAL_SECRET в .env}
+      ZAPAS_URL: ${ZAPAS_INTERNAL_URL:-http://app:3000}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+    command: ["node", "apps/supplier/dist/main.js"]
+    ports:
+      - "127.0.0.1:${SUPPLIER_PORT:-3100}:3100"
+    volumes:
+      - supplier-data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/supplier/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 4s
+      retries: 3
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  # Демо-кабинеты поставщиков (те же компании, что в справочнике «Запаса»). Запуск: docker compose --profile demo run --rm supplier-seed
+  supplier-seed:
+    build: .
+    profiles: ["demo"]
+    environment:
+      NODE_ENV: production
+      SUPPLIER_DB_FILE: /data/supplier.db
+      SUPPLIER_SESSION_SECRET: ${SUPPLIER_SESSION_SECRET:?Задайте SUPPLIER_SESSION_SECRET в .env}
+      SUPPLIER_PORTAL_SECRET: ${SUPPLIER_PORTAL_SECRET:?Задайте SUPPLIER_PORTAL_SECRET в .env}
+    command: ["node", "apps/supplier/dist/seed-cli.js"]
+    volumes:
+      - supplier-data:/data
+
+  # Добавить к демо-данным официанта, заявки гостей, заказы поставщикам в пути и вторую организацию, ничего не стирая.
+  # Запуск: docker compose --profile demo run --rm seed-platform
+  seed-platform:
+    build: .
+    profiles: ["demo"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgres://zapas_app:${DB_APP_PASSWORD}@db:5432/zapas
+      MIGRATION_DATABASE_URL: postgres://zapas_owner:${DB_OWNER_PASSWORD}@db:5432/zapas
+      JWT_SECRET: ${JWT_SECRET:?Задайте JWT_SECRET в .env}
+      BUSINESS_TZ: ${BUSINESS_TZ:-Europe/Moscow}
+    command: ["node", "apps/server/dist/seed-platform-cli.js"]
+
+  # Передать кабинету поставщика отправленные заказы. Запуск: docker compose --profile demo run --rm portal-sync
+  portal-sync:
+    build: .
+    profiles: ["demo"]
+    depends_on:
+      - supplier
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://zapas_app:${DB_APP_PASSWORD}@db:5432/zapas
+      JWT_SECRET: ${JWT_SECRET:?Задайте JWT_SECRET в .env}
+      BUSINESS_TZ: ${BUSINESS_TZ:-Europe/Moscow}
+      SUPPLIER_PORTAL_URL: http://supplier:3100/supplier
+      SUPPLIER_PORTAL_SECRET: ${SUPPLIER_PORTAL_SECRET:?Задайте SUPPLIER_PORTAL_SECRET в .env}
+    command: ["node", "apps/server/dist/portal-sync-cli.js"]
 
   # Демо-данные за 60 дней. Запуск: docker compose --profile demo run --rm seed
   seed:
@@ -102,3 +179,4 @@ services:
 
 volumes:
   pgdata:
+  supplier-data:

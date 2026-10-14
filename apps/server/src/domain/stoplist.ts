@@ -1,12 +1,14 @@
 import {
   formatQty,
   fromMilli,
+  servesDishes,
   type LocationKind,
   type LowPortionDto,
   type MissingIngredient,
   type StopReason,
   type Unit,
 } from '@zapas/shared';
+import { dishVisibleAt } from './recommendations';
 
 export interface StopProduct {
   id: string;
@@ -19,6 +21,7 @@ export interface StopProduct {
 export interface StopDish {
   id: string;
   name: string;
+  orgId?: string;
   isActive: boolean;
   items: { productId: string; qtyMilli: number }[];
 }
@@ -26,6 +29,7 @@ export interface StopDish {
 export interface StopLocation {
   id: string;
   name: string;
+  orgId?: string;
   kind: LocationKind;
   isActive: boolean;
 }
@@ -98,9 +102,9 @@ export function evaluateAutoStops(input: StopInput): { stops: AutoStop[]; warnin
       });
     }
 
-    if (location.kind !== 'kitchen') continue;
+    if (!servesDishes(location.kind)) continue;
     for (const dish of input.dishes) {
-      if (!dish.isActive) continue;
+      if (!dish.isActive || !dishVisibleAt(dish, location)) continue;
       const served = dish.items.some((i) => input.tracked.has(stockKey(i.productId, location.id)));
       if (!served) continue;
 

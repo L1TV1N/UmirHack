@@ -155,6 +155,17 @@ server {
         proxy_set_header Connection "";
     }
 
+    # Отгрузка: кабинет поставщика, отдельная система на этом же домене
+    location /supplier/ {
+        proxy_pass http://127.0.0.1:3100;
+        # заголовки повторяем: в location с собственным proxy_set_header серверные не наследуются
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$remote_addr;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Connection "";
+    }
+
     location / {
         proxy_pass http://127.0.0.1:$APP_PORT;
         proxy_set_header Connection "";

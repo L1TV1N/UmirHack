@@ -1,4 +1,4 @@
-import { hasRole, type Role, type SessionDto, type UserDto } from '@zapas/shared';
+import { hasRole, type RegisterBody, type Role, type SessionDto, type UserDto } from '@zapas/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, refreshSession, session } from '../api/client';
@@ -13,6 +13,8 @@ interface AuthValue {
   /** Сессия оборвалась сама (истекла или закрыта администратором), а не по кнопке «Выйти». */
   sessionEnded: boolean;
   login(email: string, password: string): Promise<void>;
+  /** Новая организация и её первый администратор. */
+  register(body: RegisterBody): Promise<void>;
   logout(): Promise<void>;
   can(role: Role): boolean;
 }
@@ -109,6 +111,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [apply],
   );
 
+  const register = useCallback(
+    async (body: RegisterBody) => {
+      const s = await api<SessionDto>('POST', '/auth/register', { body, auth: false });
+      apply(s);
+    },
+    [apply],
+  );
+
   const logout = useCallback(async () => {
     leaving.current = true;
     try {
@@ -122,8 +132,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [apply]);
 
   const value = useMemo<AuthValue>(
-    () => ({ status, user, sessionEnded, login, logout, can: (role) => (user ? hasRole(user.role, role) : false) }),
-    [status, user, sessionEnded, login, logout],
+    () => ({ status, user, sessionEnded, login, register, logout, can: (role) => (user ? hasRole(user.role, role) : false) }),
+    [status, user, sessionEnded, login, register, logout],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

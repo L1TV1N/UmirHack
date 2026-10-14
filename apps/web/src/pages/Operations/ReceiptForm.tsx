@@ -69,7 +69,7 @@ interface Line {
 const TEMPLATE = 'minmax(220px, 2.4fr) 120px 130px 160px 36px';
 const LABELS = ['Продукт', 'Количество', 'Себестоимость, ₽', 'Годен до', ''];
 
-export function ReceiptForm() {
+export function ReceiptForm({ presetOrder, onPresetUsed }: { presetOrder?: string | undefined; onPresetUsed?: () => void } = {}) {
   const toast = useToast();
   const { user } = useAuth();
   const [locationId, setLocation, locations] = useOperationLocation();
@@ -128,6 +128,14 @@ export function ReceiptForm() {
       toast.error(errorMessage(err));
     }
   };
+
+  // ссылка «Принять поставку» из заказа открывает приход сразу с его строками
+  useEffect(() => {
+    if (!presetOrder) return;
+    void takeOrder(presetOrder);
+    onPresetUsed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presetOrder]);
 
   const pick = (lineKey: number, product: LineProduct | null) => {
     const line = lines.find((l) => l.key === lineKey);

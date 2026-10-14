@@ -2,6 +2,8 @@ import {
   addDays,
   closeOrderBody,
   createOrderBody,
+  OPEN_ORDER_STATUSES,
+  orderDecisionBody,
   idParam,
   orderFromSuggestionBody,
   orderSuggestionsQuery,
@@ -20,6 +22,7 @@ import { assertLocation, locationFilter } from '../../lib/scope';
 import { businessToday } from '../../lib/time';
 import { asUser, requireUser } from '../../plugins/access';
 import { writeAudit } from '../audit/audit';
+import { addOrderEvent, pushOrder } from '../supplier-portal/service';
 import {
   cancelOrder,
   closeOrder,
@@ -66,14 +69,14 @@ export const orderRoutes =
         qb
           .$if(scope !== null, (q) => q.where('o.location_id', 'in', scope?.length ? scope : ['00000000-0000-0000-0000-000000000000']))
           .$if(supplierId !== undefined, (q) => q.where('o.supplier_id', '=', supplierId as string))
-          .$if(status === 'open', (q) => q.where('o.status', 'in', ['sent', 'partial']))
+          .$if(status === 'open', (q) => q.where('o.status', 'in', [...OPEN_ORDER_STATUSES]))
           .$if(status !== 'open' && status !== 'all', (q) => q.where('o.status', '=', status as 'draft'));
       const total = await db
         .selectFrom('purchase_orders as o')
         .select((eb) => eb.fn.countAll<string>().as('n'))
         .$if(scope !== null, (q) => q.where('o.location_id', 'in', scope?.length ? scope : ['00000000-0000-0000-0000-000000000000']))
         .$if(supplierId !== undefined, (q) => q.where('o.supplier_id', '=', supplierId as string))
-        .$if(status === 'open', (q) => q.where('o.status', 'in', ['sent', 'partial']))
+        .$if(status === 'open', (q) => q.where('o.status', 'in', [...OPEN_ORDER_STATUSES]))
         .$if(status !== 'open' && status !== 'all', (q) => q.where('o.status', '=', status as 'draft'))
         .executeTakeFirstOrThrow();
       const rows = await filtered(headerSelect(db)).orderBy('o.created_at', 'desc').orderBy('o.number', 'desc').limit(limit).offset(offset).execute();
@@ -141,7 +144,8 @@ export const orderRoutes =
     app.post('/orders/:id/resend', { config: { ...asUser('manager'), ...sendLimit }, schema: { params: idParam } }, async (req) => {
       const principal = requireUser(req);
       const current = await visible(principal, req.params.id);
-      if (current.status !== 'sent' && current.status !== 'partial') throw conflict('Письмо отправляется только по отправленному заказу', undefined, 'order_not_open');
+      if (!OPEN_ORDER_STATUSES.includes(current.status)) throw conflict('Письмо отправляется только по отправленному заказу', undefined, 'order_not_open');
+      await pushOrder(deps, current.id);
       await emailOrder(deps, current.id, principal.email);
       await writeAudit(db, { action: 'order.resend', entity: 'purchase_order', entityId: current.id, principal, meta: req.meta, at: deps.clock(), details: { number: current.number } });
       return detail(current.id);
@@ -149,11 +153,36 @@ export const orderRoutes =
 
     app.post('/orders/:id/cancel', { config: asUser('manager'), schema: { params: idParam } }, async (req) => {
       await cancelOrder(deps, requireUser(req), req.meta, req.params.id);
+      await pushOrder(deps, req.params.id);
       return detail(req.params.id);
+    });
+
+    // Решение покупателя при приёмке: замечание поставщику или отказ от поставки. Оба видны в кабинете поставщика.
+    app.post('/orders/:id/decision', { config: asUser('manager'), schema: { params: idParam, body: orderDecisionBody } }, async (req) => {
+      const principal = requireUser(req);
+      const current = await visible(principal, req.params.id);
+      const b = req.body;
+      const now = deps.clock();
+      if (b.decision === 'refuse' && !OPEN_ORDER_STATUSES.includes(current.status)) {
+        throw conflict('Отказаться можно от отправленного заказа, который ещё не закрыт', undefined, 'order_not_open');
+      }
+      if (b.decision === 'remark' && current.status === 'draft') throw conflict('Черновик ещё не отправлен поставщику', undefined, 'order_draft');
+      await db.transaction().execute(async (trx) => {
+        await trx
+          .updateTable('purchase_orders')
+          .set({ buyer_note: b.comment, updated_at: now, ...(b.decision === 'refuse' ? { status: 'refused', closed_at: now } : {}) })
+          .where('id', '=', current.id)
+          .execute();
+        await addOrderEvent(trx, current.id, 'buyer', b.decision === 'refuse' ? 'refused' : current.status, `${b.decision === 'refuse' ? 'Отказ от поставки' : 'Замечание по приёмке'}: ${b.comment}`, principal.fullName, now);
+        await writeAudit(trx, { action: `order.${b.decision}`, entity: 'purchase_order', entityId: current.id, principal, meta: req.meta, at: now, details: { number: current.number, comment: b.comment } });
+      });
+      await pushOrder(deps, current.id);
+      return detail(current.id);
     });
 
     app.post('/orders/:id/close', { config: asUser('manager'), schema: { params: idParam, body: closeOrderBody } }, async (req) => {
       await closeOrder(deps, requireUser(req), req.meta, req.params.id, req.body.comment);
+      await pushOrder(deps, req.params.id);
       return detail(req.params.id);
     });
 

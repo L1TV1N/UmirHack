@@ -45,7 +45,7 @@ export async function getSupplierRating(deps: Deps, principal: Principal, reques
       SELECT o.id, o.supplier_id, o.expected_on,
              (SELECT min((d.created_at AT TIME ZONE ${tz})::date) FROM documents d WHERE d.order_id = o.id) AS first_on
       FROM purchase_orders o
-      WHERE o.status IN ('sent', 'partial', 'received')
+      WHERE o.status IN ('sent', 'confirmed', 'shipped', 'partial', 'received')
         AND o.sent_at >= ${from}::timestamptz AND o.sent_at <= ${now}::timestamptz
         AND (o.status = 'received' OR o.expected_on IS NULL OR o.expected_on < ${today}::date)
         ${scoped('o.location_id')}

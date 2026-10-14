@@ -2,13 +2,14 @@ import {
   formatMoney,
   formatQty,
   ORDER_STATUS_LABELS,
+  OPEN_ORDER_STATUSES,
   UNIT_LABELS,
   type OrderDetailDto,
   type OrderLineDto,
   type OrderStatus,
   type ProductDto,
 } from '@zapas/shared';
-import { Copy, Download, Mail, Plus, Send, Trash2, X } from 'lucide-react';
+import { Copy, Download, Mail, PackageCheck, Plus, Send, Trash2, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { downloadFile, patch, post } from '../../api/client';
 import { useAction, useGet } from '../../api/hooks';
@@ -24,7 +25,17 @@ import { errorMessage } from '../../lib/errors';
 import { fmtDate, fmtDateTime, parseDecimal } from '../../lib/format';
 import styles from './Orders.module.scss';
 
-export const STATUS_TONE: Record<OrderStatus, Tone> = { draft: 'neutral', sent: 'info', partial: 'amber', received: 'ok', cancelled: 'neutral' };
+export const STATUS_TONE: Record<OrderStatus, Tone> = {
+  draft: 'neutral',
+  sent: 'info',
+  confirmed: 'ok',
+  shipped: 'amber',
+  partial: 'amber',
+  received: 'ok',
+  declined: 'danger',
+  refused: 'danger',
+  cancelled: 'neutral',
+};
 
 interface Row {
   productId: string;
@@ -37,7 +48,7 @@ interface Row {
 
 const toRow = (l: OrderLineDto): Row => ({ productId: l.productId, name: l.productName, sku: l.sku, unit: l.unit, quantity: String(l.quantity), unitCost: String(l.unitCost) });
 
-export function OrderDialog({ orderId, onClose }: { orderId: string | null; onClose: () => void }) {
+export function OrderDialog({ orderId, onClose, onReceive }: { orderId: string | null; onClose: () => void; onReceive?: (id: string) => void }) {
   const toast = useToast();
   const confirm = useConfirm();
   const query = useGet<OrderDetailDto>(`/orders/${orderId ?? 'none'}`, undefined, { enabled: orderId !== null });
@@ -48,6 +59,7 @@ export function OrderDialog({ orderId, onClose }: { orderId: string | null; onCl
   const [error, setError] = useState<string | null>(null);
   const [showText, setShowText] = useState(false);
   const [closing, setClosing] = useState<string | null>(null);
+  const [decision, setDecision] = useState<{ kind: 'refuse' | 'remark'; text: string } | null>(null);
   const [adding, setAdding] = useState(false);
   const [exporting, setExporting] = useState(false);
 
@@ -61,11 +73,13 @@ export function OrderDialog({ orderId, onClose }: { orderId: string | null; onCl
     setError(null);
     setShowText(false);
     setClosing(null);
+    setDecision(null);
     setAdding(false);
   }, [order]);
 
   const draft = order?.status === 'draft';
-  const open = order?.status === 'sent' || order?.status === 'partial';
+  const open = order ? OPEN_ORDER_STATUSES.includes(order.status) : false;
+  const sentToSupplier = order !== undefined && order.status !== 'draft' && order.status !== 'cancelled';
 
   const collect = (): { productId: string; quantity: number; unitCost: number }[] | null => {
     const lines = rows.map((r) => ({ productId: r.productId, quantity: parseDecimal(r.quantity), unitCost: parseDecimal(r.unitCost) }));
@@ -209,6 +223,12 @@ export function OrderDialog({ orderId, onClose }: { orderId: string | null; onCl
               <dd>{order.sentAt ? fmtDateTime(order.sentAt) : '-'}</dd>
             </div>
             <div>
+              <dt>Кабинет поставщика</dt>
+              <dd>
+                {order.portalPushedAt ? <Chip tone="ok">передан {fmtDateTime(order.portalPushedAt)}</Chip> : order.portalError ? <Chip tone="amber">{order.portalError}</Chip> : <span className="muted">{draft ? 'уйдёт при отправке' : '-'}</span>}
+              </dd>
+            </div>
+            <div>
               <dt>Письмо поставщику</dt>
               <dd>
                 {order.emailedAt ? <Chip tone="ok">отправлено {fmtDateTime(order.emailedAt)}</Chip> : order.emailError ? <Chip tone="amber">{order.emailError}</Chip> : <span className="muted">{draft ? 'уйдёт при отправке' : '-'}</span>}
@@ -217,6 +237,10 @@ export function OrderDialog({ orderId, onClose }: { orderId: string | null; onCl
           </dl>
 
           {draft && !order.supplierEmail && <p className={styles.warn}>У поставщика не указана почта. Заказ можно отправить, но письмо не уйдёт: текст придётся передать самостоятельно (кнопка «Скопировать текст»).</p>}
+          {order.deliveryOn && <p className={styles.note}>Поставщик обещает привезти {fmtDate(order.deliveryOn)}.</p>}
+          {order.supplierNote && <p className={styles.note}>Сообщение поставщика: {order.supplierNote}</p>}
+          {order.buyerNote && <p className={styles.note}>Ваше решение при приёмке: {order.buyerNote}</p>}
+          {order.status === 'declined' && <p className={styles.warn}>Поставщик отказал в поставке. Закажите у другого или повторите заказ позже.</p>}
           {order.status === 'partial' && <p className={styles.warn}>Часть заказа принята. Если поставщик больше ничего не привезёт, закройте заказ: недопоставка перестанет считаться «в пути».</p>}
 
           <div className={styles.scroll}>
@@ -327,12 +351,17 @@ export function OrderDialog({ orderId, onClose }: { orderId: string | null; onCl
                 Отправить письмо ещё раз
               </Button>
             )}
+            {open && onReceive && (
+              <Button size="sm" variant="primary" icon={<PackageCheck size={14} />} onClick={() => onReceive(order.id)}>
+                Принять поставку
+              </Button>
+            )}
             {open && closing === null && (
               <Button size="sm" onClick={() => setClosing('')}>
                 Закрыть заказ
               </Button>
             )}
-            {(draft || order.status === 'sent') && (
+            {(draft || order.status === 'sent' || order.status === 'confirmed') && (
               <Button size="sm" variant="danger" onClick={() => void cancel()}>
                 Отменить заказ
               </Button>
@@ -350,6 +379,42 @@ export function OrderDialog({ orderId, onClose }: { orderId: string | null; onCl
               </Button>
               <Button onClick={() => setClosing(null)}>Не закрывать</Button>
             </div>
+          )}
+
+          {open && decision === null && (
+            <div className={styles.actions} style={{ marginTop: 10 }}>
+              <Button size="sm" onClick={() => setDecision({ kind: 'remark', text: '' })}>
+                Замечание по приёмке
+              </Button>
+              <Button size="sm" variant="danger" onClick={() => setDecision({ kind: 'refuse', text: '' })}>
+                Отказаться от поставки
+              </Button>
+            </div>
+          )}
+          {open && decision !== null && (
+            <div className={styles.close}>
+              <Field label={decision.kind === 'refuse' ? 'Причина отказа от поставки' : 'Замечание поставщику'}>
+                {(p) => <Input {...p} value={decision.text} maxLength={300} autoFocus placeholder={decision.kind === 'refuse' ? 'Например, товар не соответствует заказу' : 'Например, часть товара с коротким сроком'} onChange={(e) => setDecision({ ...decision, text: e.target.value })} />}
+              </Field>
+              <Button
+                variant={decision.kind === 'refuse' ? 'dangerSolid' : 'primary'}
+                loading={act.isPending}
+                onClick={() => (decision.text.trim() ? run({ path: `/orders/${order.id}/decision`, body: { decision: decision.kind, comment: decision.text.trim() } }, decision.kind === 'refuse' ? 'Отказ передан поставщику' : 'Замечание передано поставщику') : setError('Напишите, что передать поставщику'))}
+              >
+                {decision.kind === 'refuse' ? 'Отказаться' : 'Передать'}
+              </Button>
+              <Button onClick={() => setDecision(null)}>Отмена</Button>
+            </div>
+          )}
+
+          {sentToSupplier && order.events.length > 0 && (
+            <ol className={styles.timeline} aria-label="История заказа">
+              {[...order.events].reverse().map((e) => (
+                <li key={e.id} className={e.side === 'supplier' ? styles.fromSupplier : ''}>
+                  <time>{fmtDateTime(e.at)}</time> <b>{e.side === 'supplier' ? 'Поставщик' : e.actor}</b>: {e.text}
+                </li>
+              ))}
+            </ol>
           )}
 
           {showText && <pre className={styles.text}>{order.text}</pre>}

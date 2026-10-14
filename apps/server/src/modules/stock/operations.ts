@@ -28,6 +28,7 @@ import { invalidateSnapshots } from '../analytics/snapshot';
 import { scheduleStopListSync } from '../stoplist/service';
 import { enqueueExchange } from '../exchange/service';
 import { applyReceiptToOrder, lockOrderForReceipt } from '../orders/service';
+import { pushOrder } from '../supplier-portal/service';
 import { recordReceiptTraceability } from '../traceability/service';
 import {
   allocateNeeds,
@@ -235,7 +236,14 @@ function shortageError(
 
 // Приход
 
-export function receive(deps: Deps, actor: Actor, body: ReceiptBody, idempotencyKey?: string): Promise<DocResult> {
+/** Приход; если он по заказу поставщику, новый статус заказа уходит в кабинет поставщика. */
+export async function receive(deps: Deps, actor: Actor, body: ReceiptBody, idempotencyKey?: string): Promise<DocResult> {
+  const result = await receiveDocument(deps, actor, body, idempotencyKey);
+  if (body.orderId && !result.duplicate) await pushOrder(deps, body.orderId);
+  return result;
+}
+
+function receiveDocument(deps: Deps, actor: Actor, body: ReceiptBody, idempotencyKey?: string): Promise<DocResult> {
   const today = businessToday(deps);
   return runDocument(
     deps,

@@ -7,7 +7,7 @@ import { traceabilitySummary } from '../traceability/service';
 import { escapeHtml } from './notifier';
 
 /** Служебный принципал: сводка строится по всем точкам. */
-export const SYSTEM: Principal = { kind: 'user', id: 'system', email: 'system', fullName: 'Система', role: 'admin', locationIds: 'all' };
+export const SYSTEM: Principal = { kind: 'user', id: 'system', email: 'system', fullName: 'Система', role: 'admin', orgId: null, locationIds: 'all' };
 
 /** Сводка по тем точкам, что видны principal (по умолчанию система видит все). Можно сузить до одной точки. */
 export async function buildDigest(deps: Deps, principal: Principal = SYSTEM, locationId?: string): Promise<string> {
@@ -38,13 +38,13 @@ export async function buildDigest(deps: Deps, principal: Principal = SYSTEM, loc
   const orders = await deps.db
     .selectFrom('purchase_orders')
     .select(['status', (eb) => eb.fn.countAll<string>().as('n')])
-    .where('status', 'in', ['draft', 'sent', 'partial'])
+    .where('status', 'in', ['draft', 'sent', 'confirmed', 'shipped', 'partial'])
     .$if(scope !== null, (qb) => qb.where('location_id', 'in', scope?.length ? scope : ['00000000-0000-0000-0000-000000000000']))
     .groupBy('status')
     .execute();
   if (orders.length > 0) {
     const count = (statuses: string[]) => orders.filter((o) => statuses.includes(o.status)).reduce((s, o) => s + Number(o.n), 0);
-    const parts = [count(['draft']) > 0 ? `черновиков ${count(['draft'])}` : null, count(['sent', 'partial']) > 0 ? `ждём поставку ${count(['sent', 'partial'])}` : null].filter(Boolean);
+    const parts = [count(['draft']) > 0 ? `черновиков ${count(['draft'])}` : null, count(['sent', 'confirmed', 'shipped', 'partial']) > 0 ? `ждём поставку ${count(['sent', 'confirmed', 'shipped', 'partial'])}` : null].filter(Boolean);
     lines.push(`Заказы поставщикам: ${parts.join(', ')}`);
   }
 

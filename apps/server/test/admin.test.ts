@@ -32,7 +32,9 @@ describe('пользователи', () => {
     });
     expect(ok.statusCode).toBe(201);
     expect(ok.json()).toMatchObject({ email: 'new.user@example.ru', role: 'storekeeper', locationIds: [w.locA.id] });
-    expect(ok.body).not.toMatch(/hash|password/i);
+    expect(ok.body).not.toMatch(/hash|argon2|клубника/i);
+    expect(ok.json().temporaryPassword).toBeNull();
+    expect(ok.json().mustChangePassword).toBe(true);
     const dup = await admin()('POST', '/api/users', { email: 'new.user@example.ru', fullName: 'Другая', role: 'viewer', password: 'клубника-на-рельсах-38' });
     expect(dup.statusCode).toBe(409);
     const list = await admin()('GET', '/api/users');

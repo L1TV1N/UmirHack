@@ -4,7 +4,7 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { LocationsTable } from '../../db/types';
 import type { Deps } from '../../lib/context';
 import { badRequest, conflict, notFound, PG_UNIQUE_VIOLATION, pgCode } from '../../lib/errors';
-import { locationFilter } from '../../lib/scope';
+import { locationFilter, orgOf } from '../../lib/scope';
 import { asUser, requirePrincipal } from '../../plugins/access';
 import { writeAudit } from '../audit/audit';
 
@@ -26,10 +26,10 @@ export const locationRoutes =
   async (app) => {
     const { db } = deps;
 
-    app.get('/locations', { config: asUser() }, async (req) => {
+    app.get('/locations', { config: asUser('waiter') }, async (req) => {
       const principal = requirePrincipal(req);
       const allowed = locationFilter(principal);
-      let q = db.selectFrom('locations').selectAll().orderBy('name');
+      let q = db.selectFrom('locations').selectAll().where('org_id', '=', orgOf(principal)).orderBy('name');
       if (allowed) q = q.where('id', 'in', allowed.length ? allowed : ['00000000-0000-0000-0000-000000000000']);
       return (await q.execute()).map(toLocationDto);
     });
@@ -41,6 +41,7 @@ export const locationRoutes =
           const created = await trx
             .insertInto('locations')
             .values({
+              org_id: orgOf(principal),
               code: req.body.code,
               name: req.body.name,
               kind: req.body.kind,
@@ -76,7 +77,7 @@ export const locationRoutes =
         const principal = requirePrincipal(req);
         const { name, kind, address, isActive, latitude, longitude } = req.body;
         return db.transaction().execute(async (trx) => {
-          const current = await trx.selectFrom('locations').selectAll().where('id', '=', req.params.id).forUpdate().executeTakeFirst();
+          const current = await trx.selectFrom('locations').selectAll().where('id', '=', req.params.id).where('org_id', '=', orgOf(principal)).forUpdate().executeTakeFirst();
           if (!current) throw notFound('Точка');
           if (isActive === false && current.is_active) {
             // на отключённой точке запрещены любые операции, остаток нельзя было бы даже списать

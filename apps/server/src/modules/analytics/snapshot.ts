@@ -40,6 +40,11 @@ const NO_ROWS = ['00000000-0000-0000-0000-000000000000'];
 
 let loads = 0;
 
+const orgIdsOf = (rows: { org_id: string }[]): string[] => {
+  const ids = [...new Set(rows.map((r) => r.org_id))];
+  return ids.length ? ids : NO_ROWS;
+};
+
 /**
  * Единый срез данных для рекомендаций, стоп-листа и панели. ids = null означает все точки.
  */
@@ -47,21 +52,22 @@ export async function loadSnapshot(deps: Deps, locationIds: string[] | null): Pr
   const { db } = deps;
   const seq = (loads += 1);
   const today = businessToday(deps);
-  const settings = await getSettings(db);
   const scope = locationIds === null ? null : locationIds.length ? locationIds : NO_ROWS;
 
   const locationRows = await db
     .selectFrom('locations')
-    .select(['id', 'name', 'kind', 'is_active'])
+    .select(['id', 'name', 'kind', 'is_active', 'org_id'])
     .$if(scope !== null, (qb) => qb.where('id', 'in', scope as string[]))
     .execute();
+  const settings = await getSettings(db, locationRows[0]?.org_id);
   const locations = new Map<string, RecLocation>(
-    locationRows.map((l) => [l.id, { id: l.id, name: l.name, kind: l.kind, isActive: l.is_active }]),
+    locationRows.map((l) => [l.id, { id: l.id, name: l.name, kind: l.kind, isActive: l.is_active, orgId: l.org_id }]),
   );
 
   const productRows = await db
     .selectFrom('products')
     .select(['id', 'sku', 'name', 'unit', 'price', 'cost', 'min_stock', 'sellable', 'is_active'])
+    .$if(scope !== null, (qb) => qb.where('org_id', 'in', orgIdsOf(locationRows)))
     .execute();
   const products = new Map<string, SnapshotProduct>(
     productRows.map((p) => [
@@ -168,7 +174,13 @@ export async function loadSnapshot(deps: Deps, locationIds: string[] | null): Pr
     }
   }
 
-  const dishRows = await db.selectFrom('dishes').select(['id', 'name', 'price']).where('is_active', '=', true).execute();
+  const orgIds = [...new Set(locationRows.map((l) => l.org_id))];
+  const dishRows = await db
+    .selectFrom('dishes')
+    .select(['id', 'name', 'price', 'org_id'])
+    .where('is_active', '=', true)
+    .$if(scope !== null, (qb) => qb.where('org_id', 'in', orgIds.length ? orgIds : NO_ROWS))
+    .execute();
   const itemRows = dishRows.length
     ? await db
         .selectFrom('dish_items')
@@ -179,6 +191,7 @@ export async function loadSnapshot(deps: Deps, locationIds: string[] | null): Pr
   const dishes: SnapshotDish[] = dishRows.map((d) => ({
     id: d.id,
     name: d.name,
+    orgId: d.org_id,
     price: Number(d.price),
     items: itemRows.filter((i) => i.dish_id === d.id).map((i) => ({ productId: i.product_id, qtyMilli: toMilli(Number(i.quantity)) })),
   }));

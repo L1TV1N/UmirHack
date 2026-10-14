@@ -6,6 +6,7 @@ COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/
 COPY apps/server/package.json apps/server/
 COPY apps/web/package.json apps/web/
+COPY apps/supplier/package.json apps/supplier/
 RUN npm ci
 COPY . .
 RUN npm run build
@@ -19,10 +20,14 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/
 COPY apps/server/package.json apps/server/
-RUN npm ci --omit=dev --workspace=@zapas/server \
+COPY apps/supplier/package.json apps/supplier/
+RUN npm ci --omit=dev --workspace=@zapas/server --workspace=@zapas/supplier \
     && npm cache clean --force
 COPY --from=build /app/apps/server/dist apps/server/dist
 COPY --from=build /app/apps/web/dist apps/web/dist
+COPY --from=build /app/apps/supplier/dist apps/supplier/dist
+# база кабинета поставщика лежит в томе: он должен принадлежать пользователю приложения
+RUN mkdir -p /data && chown node:node /data
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=4s --start-period=20s --retries=3 \

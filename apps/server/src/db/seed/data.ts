@@ -188,4 +188,5 @@ export const USERS: UserSpec[] = [
   { email: 'manager@zapas.local', fullName: 'Белова Ирина Викторовна', role: 'manager', password: 'Лазурь-Тропа-58-мост', locations: [] },
   { email: 'keeper@zapas.local', fullName: 'Козлов Андрей Николаевич', role: 'storekeeper', password: 'Янтарь-Река-23-сосна', locations: ['wh', 'shopC'] },
   { email: 'viewer@zapas.local', fullName: 'Громова Елена Павловна', role: 'viewer', password: 'Сирень-Холм-67-ручей', locations: ['shopC', 'shopN'] },
+  { email: 'waiter@zapas.local', fullName: 'Соколова Мария Андреевна', role: 'waiter', password: 'Ромашка-Волна-34-угол', locations: ['kit'] },
 ];

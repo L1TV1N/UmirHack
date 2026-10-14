@@ -15,6 +15,7 @@ export interface World {
   manager: Session;
   keeperA: Session;
   viewerA: Session;
+  waiterA: Session;
   today: string;
   day(offset: number): string;
 }
@@ -94,14 +95,15 @@ export async function createWorld(env: TestEnv): Promise<World> {
   const kitchen = await addLocation(env, 'Кухня', 'kitchen');
   const cat = await env.db.insertInto('categories').values({ name: 'Молочные продукты' }).returning('id').executeTakeFirstOrThrow();
 
-  const [admin, manager, keeper, viewer] = await Promise.all([
+  const [admin, manager, keeper, viewer, waiter] = await Promise.all([
     createUser(env, { role: 'admin' }).then((u) => loginAs(env, u)),
     createUser(env, { role: 'manager' }).then((u) => loginAs(env, u)),
     createUser(env, { role: 'storekeeper', locationIds: [locA.id] }).then((u) => loginAs(env, u)),
     createUser(env, { role: 'viewer', locationIds: [locA.id] }).then((u) => loginAs(env, u)),
+    createUser(env, { role: 'waiter', locationIds: [kitchen.id] }).then((u) => loginAs(env, u)),
   ]);
   const today = todayIn(env.config.businessTz, env.clock.now);
-  return { locA, locB, kitchen, categoryId: cat.id, admin, manager, keeperA: keeper, viewerA: viewer, today, day: (n) => addDays(today, n) };
+  return { locA, locB, kitchen, categoryId: cat.id, admin, manager, keeperA: keeper, viewerA: viewer, waiterA: waiter, today, day: (n) => addDays(today, n) };
 }
 
 export interface ReceiptLine {

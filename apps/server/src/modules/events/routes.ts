@@ -32,7 +32,7 @@ export const eventRoutes =
 
     // Поток изменений данных (Server-Sent Events). Интерфейс не умеет передать токен в EventSource, поэтому
     // подключается обычным fetch с заголовком авторизации.
-    app.get('/events', { config: { ...asUser(), rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
+    app.get('/events', { config: { ...asUser('waiter'), rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
       const principal = requireUser(req);
       const used = perUser.get(principal.id) ?? 0;
       if (used >= MAX_STREAMS_PER_USER) throw new AppError(429, 'too_many_streams', 'Слишком много открытых потоков обновлений');

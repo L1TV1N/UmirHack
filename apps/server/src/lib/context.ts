@@ -8,6 +8,7 @@ import type { ExchangeTransport } from '../modules/exchange/transport';
 import type { WeatherProvider } from '../modules/forecast/weather';
 import type { Mailer } from '../modules/orders/mailer';
 import type { TelegramApi } from '../modules/telegram/api';
+import type { SupplierPortal } from '../modules/supplier-portal/client';
 
 export interface Logger {
   info(obj: object | string, msg?: string): void;
@@ -32,6 +33,8 @@ export interface Deps {
   exchangeTransport?: ExchangeTransport | null;
   /** Письма поставщикам с заказами (нужен SMTP). Нет: заказ отправляется без письма, причина видна в заказе. */
   mailer?: Mailer | null;
+  /** Кабинет поставщика «Отгрузка»: куда уходят заказы. Нет: заказы остаются только в «Запасе». */
+  supplierPortal?: SupplierPortal | null;
   /** Прогноз и история погоды для точек с координатами. Нет: погода в прогнозе не используется. */
   weather?: WeatherProvider | null;
 }
@@ -43,19 +46,25 @@ export type Principal =
       email: string;
       fullName: string;
       role: Role;
-      /** 'all' для admin и manager. */
+      /** Организация пользователя. Пусто только у служебного администратора фоновых задач. */
+      orgId: string | null;
+      /** Пароль выдан администратором: до смены доступны только вход и смена пароля. */
+      mustChangePassword?: boolean;
+      /** Для admin и manager это все точки их организации, для остальных назначенные. 'all' только у служебных задач. */
       locationIds: string[] | 'all';
     }
   | {
       kind: 'apikey';
       id: string;
       name: string;
+      orgId: string;
       locationIds: string[];
     }
   /** Фоновые задачи приложения: например, автоматическое списание просроченного. */
   | {
       kind: 'system';
       name: string;
+      orgId: null;
       locationIds: 'all';
     };
 

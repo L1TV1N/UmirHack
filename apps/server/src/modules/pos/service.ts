@@ -29,15 +29,21 @@ export async function resolveLines(deps: Deps, keyId: string, lines: PosNormaliz
   const codes = [...new Set(lines.flatMap((l) => [l.code, l.barcode]).filter((x): x is string => Boolean(x)).map(norm))];
   const names = [...new Set(lines.filter((l) => !l.code && !l.barcode && l.name).map((l) => norm(l.name)))];
 
+  const org = await deps.db
+    .selectFrom('api_keys as k')
+    .innerJoin('locations as l', 'l.id', 'k.location_id')
+    .select('l.org_id')
+    .where('k.id', '=', keyId)
+    .executeTakeFirstOrThrow();
   const map = await deps.db.selectFrom('pos_code_map').select(['ref', 'entity', 'entity_id']).where('key_id', '=', keyId).where('ref', 'in', list).execute();
-  const dishes = codes.length ? await deps.db.selectFrom('dishes').select(['id', 'name', 'code']).where(sql<string>`lower(code)`, 'in', codes).where('is_active', '=', true).execute() : [];
+  const dishes = codes.length ? await deps.db.selectFrom('dishes').select(['id', 'name', 'code']).where('org_id', '=', org.org_id).where(sql<string>`lower(code)`, 'in', codes).where('is_active', '=', true).execute() : [];
   const products = codes.length
-    ? await deps.db.selectFrom('products').select(['id', 'name', 'sku', 'barcode']).where((eb) => eb.or([eb(sql<string>`lower(sku)`, 'in', codes), eb('barcode', 'in', codes)])).where('is_active', '=', true).execute()
+    ? await deps.db.selectFrom('products').select(['id', 'name', 'sku', 'barcode']).where('org_id', '=', org.org_id).where((eb) => eb.or([eb(sql<string>`lower(sku)`, 'in', codes), eb('barcode', 'in', codes)])).where('is_active', '=', true).execute()
     : [];
   const byName = names.length
     ? {
-        dishes: await deps.db.selectFrom('dishes').select(['id', 'name']).where(sql<string>`lower(name)`, 'in', names).where('is_active', '=', true).execute(),
-        products: await deps.db.selectFrom('products').select(['id', 'name']).where(sql<string>`lower(name)`, 'in', names).where('is_active', '=', true).where('sellable', '=', true).execute(),
+        dishes: await deps.db.selectFrom('dishes').select(['id', 'name']).where('org_id', '=', org.org_id).where(sql<string>`lower(name)`, 'in', names).where('is_active', '=', true).execute(),
+        products: await deps.db.selectFrom('products').select(['id', 'name']).where('org_id', '=', org.org_id).where(sql<string>`lower(name)`, 'in', names).where('is_active', '=', true).where('sellable', '=', true).execute(),
       }
     : { dishes: [], products: [] };
 
@@ -146,9 +152,14 @@ export async function ingestReceipt(deps: Deps, principal: Extract<Principal, { 
 
 /** После сопоставления кода доигрываем ждавшие чеки этого подключения. */
 export async function replayPending(deps: Deps, keyId: string, meta: Actor['meta']): Promise<number> {
-  const key = await deps.db.selectFrom('api_keys').select(['id', 'name', 'location_id', 'revoked_at']).where('id', '=', keyId).executeTakeFirst();
+  const key = await deps.db
+    .selectFrom('api_keys as k')
+    .innerJoin('locations as l', 'l.id', 'k.location_id')
+    .select(['k.id', 'k.name', 'k.location_id', 'k.revoked_at', 'l.org_id'])
+    .where('k.id', '=', keyId)
+    .executeTakeFirst();
   if (!key || key.revoked_at) return 0;
-  const principal = { kind: 'apikey' as const, id: key.id, name: key.name, locationIds: [key.location_id] };
+  const principal = { kind: 'apikey' as const, id: key.id, name: key.name, orgId: key.org_id, locationIds: [key.location_id] };
   const rows = await deps.db.selectFrom('pos_inbox').select(['external_id', 'kind', 'lines']).where('key_id', '=', keyId).where('status', '=', 'pending_match').orderBy('received_at').limit(200).execute();
   let done = 0;
   for (const r of rows) {
@@ -160,10 +171,10 @@ export async function replayPending(deps: Deps, keyId: string, meta: Actor['meta
 
 /** Отказанный чек можно прогнать снова, например после прихода товара. */
 export async function retryRejected(deps: Deps, inboxId: string, meta: Actor['meta']): Promise<IngestResult | null> {
-  const row = await deps.db.selectFrom('pos_inbox as i').innerJoin('api_keys as k', 'k.id', 'i.key_id').select(['i.id', 'i.external_id', 'i.kind', 'i.lines', 'k.id as kid', 'k.name', 'k.location_id', 'k.revoked_at']).where('i.id', '=', inboxId).where('i.status', '=', 'rejected').executeTakeFirst();
+  const row = await deps.db.selectFrom('pos_inbox as i').innerJoin('api_keys as k', 'k.id', 'i.key_id').innerJoin('locations as l', 'l.id', 'k.location_id').select(['i.id', 'i.external_id', 'i.kind', 'i.lines', 'k.id as kid', 'k.name', 'k.location_id', 'k.revoked_at', 'l.org_id']).where('i.id', '=', inboxId).where('i.status', '=', 'rejected').executeTakeFirst();
   if (!row || row.revoked_at) return null;
   await deps.db.updateTable('pos_inbox').set({ status: 'pending_match', error: null }).where('id', '=', row.id).execute();
-  return ingestReceipt(deps, { kind: 'apikey', id: row.kid, name: row.name, locationIds: [row.location_id] }, meta, { externalId: row.external_id, kind: row.kind, lines: row.lines as PosNormalizedLine[] });
+  return ingestReceipt(deps, { kind: 'apikey', id: row.kid, name: row.name, orgId: row.org_id, locationIds: [row.location_id] }, meta, { externalId: row.external_id, kind: row.kind, lines: row.lines as PosNormalizedLine[] });
 }
 
 export async function listInbox(deps: Deps, f: { keyId?: string; status?: string; limit: number }): Promise<PosInboxDto[]> {

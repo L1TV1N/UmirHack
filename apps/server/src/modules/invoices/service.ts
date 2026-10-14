@@ -6,6 +6,7 @@ import {
   type InvoiceLineDto,
   type InvoiceSource,
   type Unit,
+  DEFAULT_ORG_ID,
 } from '@zapas/shared';
 import type { Deps } from '../../lib/context';
 import { itemKey, normalizeName, normalizeSupplierName, similarity } from './match';
@@ -27,24 +28,25 @@ const SIMILAR_AUTO = 0.82;
 /** Ниже этого сходства продукт даже не предлагаем. */
 const SIMILAR_HINT = 0.5;
 
-async function resolveSupplier(deps: Deps, raw: RawInvoice): Promise<InvoiceDto['supplier']> {
+async function resolveSupplier(deps: Deps, orgId: string, raw: RawInvoice): Promise<InvoiceDto['supplier']> {
   if (!raw.supplier) return null;
   const { name, inn } = raw.supplier;
   if (inn) {
-    const byInn = await deps.db.selectFrom('suppliers').select(['id']).where('inn', '=', inn).executeTakeFirst();
+    const byInn = await deps.db.selectFrom('suppliers').select(['id']).where('org_id', '=', orgId).where('inn', '=', inn).executeTakeFirst();
     if (byInn) return { name, inn, supplierId: byInn.id, how: 'inn' };
   }
   // справочник поставщиков невелик, поэтому сравниваем названия без «ООО» и кавычек в памяти
   const wanted = normalizeSupplierName(name);
-  const all = await deps.db.selectFrom('suppliers').select(['id', 'name']).where('is_active', '=', true).execute();
+  const all = await deps.db.selectFrom('suppliers').select(['id', 'name']).where('org_id', '=', orgId).where('is_active', '=', true).execute();
   const byName = wanted ? all.find((s) => normalizeSupplierName(s.name) === wanted) : undefined;
   return { name, inn, supplierId: byName?.id ?? null, how: byName ? 'name' : null };
 }
 
-async function loadCatalog(deps: Deps): Promise<CatalogProduct[]> {
+async function loadCatalog(deps: Deps, orgId: string): Promise<CatalogProduct[]> {
   const rows = await deps.db
     .selectFrom('products')
     .select(['id', 'sku', 'name', 'unit', 'barcode', 'cost', 'shelf_life_days'])
+    .where('org_id', '=', orgId)
     .where('is_active', '=', true)
     .execute();
   return rows.map((r) => ({
@@ -60,9 +62,9 @@ async function loadCatalog(deps: Deps): Promise<CatalogProduct[]> {
 }
 
 /** Накладная, готовая к показу: поставщик найден, строки сопоставлены с продуктами, повтор отмечен. */
-export async function buildInvoice(deps: Deps, raw: RawInvoice, source: InvoiceSource): Promise<InvoiceDto> {
-  const supplier = await resolveSupplier(deps, raw);
-  const catalog = await loadCatalog(deps);
+export async function buildInvoice(deps: Deps, raw: RawInvoice, source: InvoiceSource, orgId: string = DEFAULT_ORG_ID): Promise<InvoiceDto> {
+  const supplier = await resolveSupplier(deps, orgId, raw);
+  const catalog = await loadCatalog(deps, orgId);
   const byId = new Map(catalog.map((p) => [p.id, p]));
   const byBarcode = new Map<string, CatalogProduct>();
   for (const p of catalog) {

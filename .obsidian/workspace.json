@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "README.md",
+                "file": "docs/DEMO-30.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "README"
+              "title": "DEMO-30"
             }
           }
         ]
@@ -83,7 +83,8 @@
       }
     ],
     "direction": "horizontal",
-    "width": 300
+    "width": 300,
+    "collapsed": true
   },
   "right": {
     "id": "e841ca4f06990c6c",
@@ -187,15 +188,27 @@
   },
   "active": "72d55682a4b4d635",
   "lastOpenFiles": [
+    "apps/web/src/pages/Login/LoginPage.test.tsx",
+    "apps/web/src/lib/usePortalLink.ts",
+    "apps/supplier/tsup.config.bundled_w5thsim7va.mjs",
+    "apps/web/dist/index.html",
+    "apps/web/dist/assets/pro-BE6oGB5x.css",
+    "apps/web/dist/assets/manrope-vietnamese-wght-normal-usUDDRr7.woff2",
+    "apps/web/dist/assets/manrope-latin-wght-normal-DHIcAJRg.woff2",
+    "apps/web/dist/assets/manrope-latin-ext-wght-normal-Ch3YOpNY.woff2",
+    "apps/web/dist/assets/manrope-greek-wght-normal-DL7QRZyv.woff2",
+    "apps/web/dist/assets/manrope-cyrillic-wght-normal-Dvxsihut.woff2",
+    "apps/web/dist/assets/manrope-cyrillic-ext-wght-normal-C8S-KRRz.woff2",
+    "apps/web/public/help-img/supplier-order.jpg",
+    "apps/web/public/help-img/guest-orders.jpg",
+    "apps/web/public/help-img/waiter-order.jpg",
+    "apps/web/public/help-img/select-location.jpg",
+    "apps/supplier/dist/web/favicon.svg",
+    "apps/supplier/web/public/favicon.svg",
     "docs/brand/logo-mark.svg",
     "docs/brand/logo-mark.png",
     "docs/brand/logo-light.png",
     "docs/brand/logo-dark.png",
-    "docs/brand/banner.png",
-    "docs/brand/mockups/19-palette.jpg",
-    "docs/brand/mockups/12-forecast.jpg",
-    "docs/brand/mockups/03-dark.jpg",
-    "docs/brand/mockups/01-hero.jpg",
     "docs/API.md",
     "docs/ARCHITECTURE.md",
     "docs/BRAND.md",
@@ -203,18 +216,6 @@
     "docs/SECURITY.md",
     "docs/DEPLOY.md",
     "README.md",
-    "apps/web/src/components/CommandPalette/sedPajSjg",
-    "docs/brand/mockups/20-everywhere.jpg",
-    "docs/brand/mockups/18-help.jpg",
-    "deploy/set-telegram.sh",
-    "deploy/server-setup.sh",
-    "deploy",
-    "apps/server/test/telegram-proxy.test.ts",
-    "apps/server/src/modules/telegram/proxy.ts",
-    "node_modules/socks/typings/common/receiveBuffer.d.ts",
-    "node_modules/socks/typings/common/util.d.ts",
-    "node_modules/socks/typings/common/helpers.d.ts",
-    "node_modules/socks/typings/common/constants.d.ts",
     "node_modules/socks/README.md",
     "node_modules/socks/docs/examples/typescript/connectExample.md",
     "node_modules/socks/docs/examples/typescript/bindExample.md",

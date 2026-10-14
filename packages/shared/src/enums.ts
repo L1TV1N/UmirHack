@@ -1,4 +1,4 @@
-export const ROLES = ['admin', 'manager', 'storekeeper', 'viewer'] as const;
+export const ROLES = ['admin', 'manager', 'storekeeper', 'viewer', 'waiter'] as const;
 export type Role = (typeof ROLES)[number];
 
 export const ROLE_LABELS: Record<Role, string> = {
@@ -6,6 +6,7 @@ export const ROLE_LABELS: Record<Role, string> = {
   manager: 'Менеджер',
   storekeeper: 'Кладовщик',
   viewer: 'Наблюдатель',
+  waiter: 'Официант',
 };
 
 export const UNITS = ['kg', 'l', 'pcs'] as const;
@@ -17,14 +18,21 @@ export const UNIT_LABELS: Record<Unit, string> = {
   pcs: 'шт',
 };
 
-export const LOCATION_KINDS = ['warehouse', 'kitchen', 'shop'] as const;
+export const LOCATION_KINDS = ['warehouse', 'kitchen', 'shop', 'cafe', 'bar'] as const;
 export type LocationKind = (typeof LOCATION_KINDS)[number];
 
 export const LOCATION_KIND_LABELS: Record<LocationKind, string> = {
   warehouse: 'Склад',
-  kitchen: 'Кухня',
+  kitchen: 'Ресторан',
   shop: 'Магазин',
+  cafe: 'Кафе',
+  bar: 'Бар',
 };
+
+/** Точки, где готовят и продают блюда: для них считаются стоп-лист и горячие предложения, здесь работают официанты. */
+export function servesDishes(kind: LocationKind): boolean {
+  return kind === 'kitchen' || kind === 'cafe' || kind === 'bar';
+}
 
 export const DOCUMENT_KINDS = ['receipt', 'sale', 'writeoff', 'transfer', 'inventory'] as const;
 export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
@@ -104,6 +112,8 @@ export type StopReasonCode = (typeof STOP_REASON_CODES)[number];
 
 /** Порядок ролей по полномочиям: чем больше число, тем шире права. */
 export const ROLE_RANK: Record<Role, number> = {
+  /** Официант стоит ниже наблюдателя: данные учёта ему закрыты, у него свои маршруты. */
+  waiter: -1,
   viewer: 0,
   storekeeper: 1,
   manager: 2,
@@ -114,7 +124,7 @@ export function hasRole(role: Role, atLeast: Role): boolean {
   return ROLE_RANK[role] >= ROLE_RANK[atLeast];
 }
 
-/** Admin и manager видят все точки, остальные только назначенные. */
+/** Admin и manager видят все точки своей организации, остальные только назначенные. */
 export function seesAllLocations(role: Role): boolean {
   return role === 'admin' || role === 'manager';
 }

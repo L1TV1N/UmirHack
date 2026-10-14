@@ -1,6 +1,6 @@
-import { fromMilli, type Unit } from '@zapas/shared';
+import { fromMilli, servesDishes, type Unit } from '@zapas/shared';
 import { compareFefo } from './fefo';
-import type { RecBatch, RecLocation, RecProduct, RecVelocity } from './recommendations';
+import { dishVisibleAt, type RecBatch, type RecLocation, type RecProduct, type RecVelocity } from './recommendations';
 import { LOW_CONFIDENCE } from './risk';
 import { portionsPossible, stockKey, type StockPoint } from './stoplist';
 
@@ -10,6 +10,7 @@ export const FORECAST_HORIZON_HOURS = 7 * 24;
 export interface ForecastDish {
   id: string;
   name: string;
+  orgId?: string;
   items: { productId: string; qtyMilli: number }[];
 }
 
@@ -112,9 +113,9 @@ export function forecastStopList(input: StopForecastInput): StopForecastItem[] {
 
   const out: StopForecastItem[] = [];
   for (const location of input.locations.values()) {
-    if (location.kind !== 'kitchen' || !location.isActive) continue;
+    if (!servesDishes(location.kind) || !location.isActive) continue;
     for (const dish of input.dishes) {
-      if (dish.items.length === 0 || input.stopped?.has(`${dish.id}|${location.id}`)) continue;
+      if (!dishVisibleAt(dish, location) || dish.items.length === 0 || input.stopped?.has(`${dish.id}|${location.id}`)) continue;
       if (dish.items.some((i) => input.blockedProducts?.has(stockKey(i.productId, location.id)))) continue;
       const portionsNow = portionsPossible(dish, location.id, input.stock);
       if (portionsNow <= 0) continue;

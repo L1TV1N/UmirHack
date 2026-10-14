@@ -78,7 +78,7 @@ export async function consumeLinkCode(deps: Deps, rawCode: string, chat: { id: n
         action: 'telegram.link',
         entity: 'user',
         entityId: found.user_id,
-        principal: userPrincipal(loaded.row, loaded.locationIds),
+        principal: userPrincipal(loaded),
         meta: BOT_META,
         at: now,
         details: { replaced: Boolean(previous) },
@@ -113,7 +113,7 @@ export async function principalOfChat(deps: Deps, chatId: number): Promise<{ pri
     await deps.db.deleteFrom('telegram_links').where('chat_id', '=', String(chatId)).execute();
     return 'inactive';
   }
-  return { principal: userPrincipal(loaded.row, loaded.locationIds), row: loaded.row };
+  return { principal: userPrincipal(loaded), row: loaded.row };
 }
 
 /** Отвязка внутри чужой транзакции: смена пароля и отключение учётной записи уничтожают и этот доступ. */

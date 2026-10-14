@@ -6,6 +6,7 @@ import {
   type ImportPreviewDto,
   type ImportRowDto,
   type Unit,
+  DEFAULT_ORG_ID,
 } from '@zapas/shared';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../db/types';
@@ -204,7 +205,7 @@ export interface ImportPlan {
 
 type Reader = Pick<Kysely<Database>, 'selectFrom'>;
 
-export async function planImport(db: Reader, bytes: Buffer, createCategories: boolean): Promise<ImportPlan> {
+export async function planImport(db: Reader, bytes: Buffer, createCategories: boolean, orgId: string = DEFAULT_ORG_ID): Promise<ImportPlan> {
   if (bytes.length === 0) throw new ImportFormatError('Файл пустой');
   if (bytes.length > MAX_IMPORT_BYTES) throw new ImportFormatError('Файл больше 2 МБ');
   const { text, encoding } = decodeCsv(bytes);
@@ -238,16 +239,17 @@ export async function planImport(db: Reader, bytes: Buffer, createCategories: bo
     const rows = await db
       .selectFrom('products')
       .select(columnsSelected)
+      .where('org_id', '=', orgId)
       .where((eb) => eb(eb.fn('lower', ['sku']), 'in', skus.slice(from, from + 1000)))
       .execute();
     for (const r of rows) bySku.set(r.sku.toLowerCase(), r);
   }
   const byBarcode = new Map<string, { id: string; sku: string; name: string }>();
   for (let from = 0; from < barcodes.length; from += 1000) {
-    const rows = await db.selectFrom('products').select(['id', 'sku', 'name', 'barcode']).where('barcode', 'in', barcodes.slice(from, from + 1000)).execute();
+    const rows = await db.selectFrom('products').select(['id', 'sku', 'name', 'barcode']).where('org_id', '=', orgId).where('barcode', 'in', barcodes.slice(from, from + 1000)).execute();
     for (const r of rows) if (r.barcode) byBarcode.set(r.barcode, r);
   }
-  const categories = await db.selectFrom('categories').select(['id', 'name']).execute();
+  const categories = await db.selectFrom('categories').select(['id', 'name']).where('org_id', '=', orgId).execute();
   const categoryByName = new Map(categories.map((c) => [c.name.toLowerCase(), c]));
   const categoryNameById = new Map(categories.map((c) => [c.id, c.name]));
 
