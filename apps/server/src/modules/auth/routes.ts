@@ -1,4 +1,4 @@
-import { changePasswordBody, loginBody, registerBody, twoFactorResendBody, twoFactorVerifyBody } from '@zapas/shared';
+import { changePasswordBody, loginBody, registerBody, resendEmailBody, twoFactorResendBody, twoFactorVerifyBody, verifyEmailBody } from '@zapas/shared';
 import type { FastifyReply } from 'fastify';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { Deps } from '../../lib/context';
@@ -6,7 +6,8 @@ import { unauthorized } from '../../lib/errors';
 import { asUser, open, requireUser } from '../../plugins/access';
 import { assertTrustedOrigin } from '../../plugins/security';
 import { loadUser, toUserDto } from '../users/users';
-import { changePassword, completeTwoFactorLogin, login, logout, refresh, register, resendLoginCode, type SessionResult } from './service';
+import { resendEmailCode } from './email-verification';
+import { changePassword, completeTwoFactorLogin, login, logout, refresh, register, resendLoginCode, verifyEmail, type SessionResult } from './service';
 
 export const REFRESH_COOKIE = 'zapas_rt';
 
@@ -37,6 +38,8 @@ export const authRoutes =
         const result = await login(deps, req.body, req.meta);
         // нужен код из Telegram: сессии и cookie ещё нет
         if ('twoFactor' in result) return result.twoFactor;
+        // почта не подтверждена: нужен код из письма
+        if ('emailVerificationRequired' in result) return result;
         return respond(reply, result);
       },
     );
@@ -65,8 +68,28 @@ export const authRoutes =
       { config: { ...open, rateLimit: { max: deps.config.loginRateLimitMax, timeWindow: '1 minute' } }, schema: { body: registerBody } },
       async (req, reply) => {
         assertTrustedOrigin(req, deps.config);
+        const result = await register(deps, req.body, req.meta);
+        if ('emailVerificationRequired' in result) return reply.status(202).send(result);
         void reply.status(201);
-        return respond(reply, await register(deps, req.body, req.meta));
+        return respond(reply, result);
+      },
+    );
+
+    app.post(
+      '/auth/verify-email',
+      { config: { ...open, rateLimit: { max: deps.config.loginRateLimitMax, timeWindow: '1 minute' } }, schema: { body: verifyEmailBody } },
+      async (req, reply) => {
+        assertTrustedOrigin(req, deps.config);
+        return respond(reply, await verifyEmail(deps, req.body, req.meta));
+      },
+    );
+
+    app.post(
+      '/auth/verify-email/resend',
+      { config: { ...open, rateLimit: { max: deps.config.loginRateLimitMax, timeWindow: '1 minute' } }, schema: { body: resendEmailBody } },
+      async (req) => {
+        assertTrustedOrigin(req, deps.config);
+        return resendEmailCode(deps, req.body.email);
       },
     );
 

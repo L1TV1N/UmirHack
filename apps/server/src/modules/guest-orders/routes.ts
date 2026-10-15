@@ -1,10 +1,12 @@
 import {
   createGuestOrderBody,
+  idempotencyKey,
   guestOrderStatusBody,
   guestOrdersQuery,
   idParam,
   reportIncidentBody,
   resolveIncidentBody,
+  ruDate,
   waiterLocationQuery,
   type GuestOrderDetailDto,
   type GuestOrderDto,
@@ -15,6 +17,7 @@ import {
 } from '@zapas/shared';
 import type { FastifyRequest } from 'fastify';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
+import { z } from 'zod';
 import type { Actor, Deps } from '../../lib/context';
 import { assertLocation } from '../../lib/scope';
 import { asUser, requireUser } from '../../plugins/access';
@@ -28,8 +31,10 @@ function shortReason(e: StopListEntryDto): string {
   if (e.source === 'manual') return 'Снято вручную';
   const r = e.reasons[0];
   if (!r) return 'Нет в наличии';
-  if (r.code === 'missing_ingredients' && r.missing?.length) return `Не хватает: ${r.missing.map((m) => m.name).join(', ')}`;
-  return r.text;
+  const base = r.code === 'missing_ingredients' && r.missing?.length ? `Не хватает: ${r.missing.map((m) => m.name).join(', ')}` : r.text;
+  // официанту полезно знать, когда блюдо вернётся: поставка уже едет
+  const next = e.incoming?.[0];
+  return next ? `${base}. Поставка ${ruDate(next.arrivesOn)}` : base;
 }
 
 export const guestOrderRoutes =
@@ -40,9 +45,9 @@ export const guestOrderRoutes =
 
     // Заказы гостей: официант принимает, менеджер и администратор ведут до выдачи
 
-    app.post('/guest-orders', { config: asUser('waiter'), schema: { body: createGuestOrderBody } }, async (req, reply): Promise<GuestOrderDetailDto> => {
+    app.post('/guest-orders', { config: asUser('waiter'), schema: { body: createGuestOrderBody, headers: z.object({ 'idempotency-key': idempotencyKey.optional() }) } }, async (req, reply): Promise<GuestOrderDetailDto> => {
       void reply.status(201);
-      return createOrder(deps, actor(req), req.body);
+      return createOrder(deps, actor(req), req.body, req.headers['idempotency-key']);
     });
 
     app.get('/guest-orders', { config: asUser('waiter'), schema: { querystring: guestOrdersQuery } }, async (req): Promise<GuestOrderDto[]> => {

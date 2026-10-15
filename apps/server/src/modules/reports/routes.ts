@@ -4,6 +4,8 @@ import {
   WRITEOFF_REASON_LABELS,
   UNIT_LABELS,
   reportQuery,
+  rescuedQuery,
+  shortagesQuery,
   type BatchDto,
   type MovementDto,
 } from '@zapas/shared';
@@ -14,6 +16,7 @@ import { locationFilter } from '../../lib/scope';
 import { businessToday } from '../../lib/time';
 import { asUser, requireUser } from '../../plugins/access';
 import { writeAudit } from '../audit/audit';
+import { getRescuedStats, getShortageStats } from '../analytics/service';
 import { listBatches, listMovements } from '../stock/queries';
 
 const MAX_ROWS = 50_000;
@@ -135,6 +138,31 @@ export const reportRoutes =
       return reply
         .header('Content-Type', 'text/csv; charset=utf-8')
         .header('Content-Disposition', `attachment; filename="movements-${today()}.csv"`)
+        .send(out);
+    });
+    // Спасено уценкой: что продали со скидкой до конца срока и сколько это принесло
+    app.get('/reports/rescued.csv', { config: asUser('manager'), schema: { querystring: rescuedQuery } }, async (req, reply) => {
+      const d = await getRescuedStats(deps, requireUser(req), req.query.locationId, req.query.days);
+      const rows: unknown[][] = d.products.map((p) => [p.productName, UNIT_LABELS[p.unit], p.quantity, p.revenue, p.cost, Math.round((p.revenue - p.cost) * 100) / 100]);
+      rows.push(['Итого', '', '', d.revenue, d.cost, Math.round((d.revenue - d.cost) * 100) / 100]);
+      const csv = toCsv(['Продукт', 'Ед.', 'Продано по скидке', 'Выручка', 'Себестоимость', 'Выручка минус себестоимость'], rows);
+      const out = await exportCsv(req, 'rescued', csv, d.products.length);
+      return reply
+        .header('Content-Type', 'text/csv; charset=utf-8')
+        .header('Content-Disposition', `attachment; filename="rescued-${req.query.days}d-${today()}.csv"`)
+        .send(out);
+    });
+
+    // Дефицитные ингредиенты: сколько продукт не давал готовить и что из-за него потеряли
+    app.get('/reports/shortages.csv', { config: asUser('manager'), schema: { querystring: shortagesQuery } }, async (req, reply) => {
+      const d = await getShortageStats(deps, requireUser(req), req.query.locationId, req.query.days);
+      const rows: unknown[][] = d.ingredients.map((i) => [i.productName, UNIT_LABELS[i.unit], i.episodes, i.hours, i.dishesBlocked, i.refusedOrders, i.lostRevenue, i.ongoing ? 'да' : 'нет']);
+      rows.push(['Итого', '', d.totals.episodes, d.totals.hours, '', d.totals.refusedOrders, d.totals.lostRevenue, '']);
+      const csv = toCsv(['Продукт', 'Ед.', 'Нехваток', 'Часов без остатка', 'Блюд остановлено (максимум)', 'Отклонено заказов', 'Потеряно выручки', 'Нехватка сейчас'], rows);
+      const out = await exportCsv(req, 'shortages', csv, d.ingredients.length);
+      return reply
+        .header('Content-Type', 'text/csv; charset=utf-8')
+        .header('Content-Disposition', `attachment; filename="shortages-${req.query.days}d-${today()}.csv"`)
         .send(out);
     });
   };

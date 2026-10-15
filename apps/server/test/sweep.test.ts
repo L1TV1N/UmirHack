@@ -38,6 +38,8 @@ describe('таблица маршрутов', () => {
     expect(open).toEqual([
       'GET /api/health',
       'GET /api/health/ready',
+      'GET /api/public/rescue',
+      'GET /api/public/rescue/:slug',
       'GET /api/supplier-gateway/orders/:id',
       'GET /api/supplier-portal/link',
       'POST /api/auth/2fa/resend',
@@ -46,6 +48,10 @@ describe('таблица маршрутов', () => {
       'POST /api/auth/logout',
       'POST /api/auth/refresh',
       'POST /api/auth/register',
+      'POST /api/auth/verify-email',
+      'POST /api/auth/verify-email/resend',
+      'POST /api/public/rescue/reservations',
+      'POST /api/public/rescue/reservations/cancel',
       'POST /api/supplier-gateway/lookup',
       'POST /api/supplier-gateway/status',
     ]);

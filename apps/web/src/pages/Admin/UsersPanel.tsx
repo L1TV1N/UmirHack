@@ -8,6 +8,7 @@ import {
   type LocationDto,
   type Page,
   type Role,
+  type TemporaryPasswordDto,
   type UserDto,
 } from '@zapas/shared';
 import { Copy, KeyRound, Plus } from 'lucide-react';
@@ -188,7 +189,7 @@ function CredentialsDialog({ created, onClose }: { created: CreatedUserDto | nul
     <Dialog
       open={created !== null}
       onClose={onClose}
-      title={created?.temporaryPassword ? 'Данные для входа' : 'Пользователь создан'}
+      title={created?.temporaryPassword ? 'Данные для входа' : created?.inviteSent ? 'Письмо отправлено' : 'Готово'}
       subtitle={created?.fullName}
       width={480}
       footer={
@@ -208,9 +209,11 @@ function CredentialsDialog({ created, onClose }: { created: CreatedUserDto | nul
         <>
           <pre style={{ margin: 0, padding: 14, background: 'var(--surface-100)', borderRadius: 'var(--radius)', whiteSpace: 'pre-wrap', fontSize: 14, userSelect: 'all' }}>{text}</pre>
           <p className="muted" style={{ marginTop: 12, fontSize: 13 }}>
-            Пароль показан один раз. Письмо не отправляется: почта на сервере пока не подключена, передайте данные сотруднику сами. Первый вход потребует сменить пароль.
+            Пароль показан один раз. {created.inviteError ? `Письмо не ушло: ${created.inviteError}. ` : ''}Передайте данные сотруднику сами. Первый вход потребует сменить пароль.
           </p>
         </>
+      ) : created?.inviteSent ? (
+        <p>Временный пароль отправлен на {created.email}. На экране он не показывается. При первом входе сотрудник заменит его на свой.</p>
       ) : (
         <p>Пароль задан вами, при первом входе сотрудник должен его сменить.</p>
       )}
@@ -218,11 +221,24 @@ function CredentialsDialog({ created, onClose }: { created: CreatedUserDto | nul
   );
 }
 
-function PasswordDialog({ user, onClose, onSet }: { user: UserDto | null; onClose: () => void; onSet: (u: UserDto, password: string) => void }) {
+function PasswordDialog({ user, onClose, onSet, onTemporary }: { user: UserDto | null; onClose: () => void; onSet: (u: UserDto, password: string) => void; onTemporary: (u: UserDto, r: TemporaryPasswordDto) => void }) {
   const toast = useToast();
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const save = useAction((v: { id: string; password: string }) => put(`/users/${v.id}/password`, { password: v.password }), ['/users']);
+  const temporary = useAction((id: string) => post<TemporaryPasswordDto>(`/users/${id}/temporary-password`, {}), ['/users']);
+
+  const issueTemporary = () => {
+    if (!user) return;
+    temporary.mutate(user.id, {
+      onSuccess: (r) => {
+        toast.success(r.inviteSent ? 'Временный пароль отправлен письмом' : 'Временный пароль создан');
+        onTemporary(user, r);
+        onClose();
+      },
+      onError: (err) => setError(errorMessage(err)),
+    });
+  };
 
   useEffect(() => {
     setPassword('');
@@ -266,9 +282,14 @@ function PasswordDialog({ user, onClose, onSet }: { user: UserDto | null; onClos
         <Field label="Пароль" hint="При первом входе человек выберет свой. Передайте этот пароль безопасным способом." error={error ?? undefined} required>
           {(p) => <Input {...p} type="text" autoComplete="off" value={password} onChange={(e) => setPassword(e.target.value)} autoFocus />}
         </Field>
-        <Button size="sm" icon={<KeyRound size={14} />} onClick={() => setPassword(randomPassword())} style={{ marginTop: 10 }}>
-          Сгенерировать
-        </Button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+          <Button size="sm" icon={<KeyRound size={14} />} onClick={() => setPassword(randomPassword())}>
+            Сгенерировать
+          </Button>
+          <Button size="sm" onClick={issueTemporary} loading={temporary.isPending}>
+            Выслать временный пароль
+          </Button>
+        </div>
       </form>
     </Dialog>
   );
@@ -389,7 +410,12 @@ export function UsersPanel() {
         )}
       </Panel>
       <UserDialog open={editing !== null} user={editing && editing !== 'new' ? editing : null} onClose={() => setEditing(null)} onCreated={setCredentials} locations={(locations.data ?? []).filter((l) => l.isActive)} />
-      <PasswordDialog user={passwordFor} onClose={() => setPasswordFor(null)} onSet={(u, password) => setCredentials({ ...u, temporaryPassword: password })} />
+      <PasswordDialog
+        user={passwordFor}
+        onClose={() => setPasswordFor(null)}
+        onSet={(u, password) => setCredentials({ ...u, temporaryPassword: password, inviteSent: false, inviteError: null })}
+        onTemporary={(u, r) => setCredentials({ ...u, ...r })}
+      />
       <CredentialsDialog created={credentials} onClose={() => setCredentials(null)} />
     </>
   );

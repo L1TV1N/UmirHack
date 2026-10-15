@@ -11,6 +11,7 @@ import type { ExchangeRequest, ExchangeResponse, ExchangeTransport } from '../sr
 import { MemoryNotifier } from '../src/modules/notifications/notifier';
 import { resetForecastCache } from '../src/modules/forecast/service';
 import { FakeWeatherProvider } from '../src/modules/forecast/weather';
+import type { QuestionPlanner } from '../src/modules/assistant/planner';
 import { FakeMailer } from '../src/modules/orders/mailer';
 import { drainStopListSync } from '../src/modules/stoplist/service';
 import { hashPassword } from '../src/modules/auth/password';
@@ -138,13 +139,15 @@ export interface TestEnv {
   close(): Promise<void>;
 }
 
-export async function createTestEnv(overrides: Record<string, string> = {}, now = new Date('2026-10-08T09:00:00Z')): Promise<TestEnv> {
+export async function createTestEnv(overrides: Record<string, string> = {}, now = new Date('2026-10-08T09:00:00Z'), extras: { questionPlanner?: QuestionPlanner } = {}): Promise<TestEnv> {
   process.env.NODE_ENV = 'test';
   loadEnvFile('test');
   const config = parseConfig({
     ...process.env,
     RATE_LIMIT_MAX: '100000',
     LOGIN_RATE_LIMIT_MAX: '1000',
+    ASSISTANT_RATE_LIMIT: '1000',
+    STOREFRONT_RESERVE_LIMIT: '1000',
     ...overrides,
   });
   const appHandle: DbHandle = createDb(config.databaseUrl, 5);
@@ -163,10 +166,10 @@ export async function createTestEnv(overrides: Record<string, string> = {}, now 
   const mailer = new FakeMailer();
   const weather = new FakeWeatherProvider();
   const portal = new FakePortal();
-  const app = await buildApp({ db: appHandle.db, config, clock: () => clock.now, notifier, telegram, invoiceReader, webhookSender: webhooks, exchangeTransport: exchange, mailer, weather, supplierPortal: portal });
+  const app = await buildApp({ db: appHandle.db, config, clock: () => clock.now, notifier, telegram, invoiceReader, webhookSender: webhooks, exchangeTransport: exchange, mailer, weather, supplierPortal: portal, ...extras });
   await app.ready();
 
-  const runtime: Deps = { db: appHandle.db, config, clock: () => clock.now, notifier, telegram, webhookSender: webhooks, exchangeTransport: exchange, mailer, weather, supplierPortal: portal, log: console };
+  const runtime: Deps = { db: appHandle.db, config, clock: () => clock.now, notifier, telegram, webhookSender: webhooks, exchangeTransport: exchange, mailer, weather, supplierPortal: portal, ...extras, log: console };
   let bot = new TelegramBot(runtime, telegram);
   await bot.prepare();
   return {

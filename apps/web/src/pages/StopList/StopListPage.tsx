@@ -1,4 +1,4 @@
-import { daysWord, formatQty, type DishDto, type ProductDto, type StopForecastDto, type StopListDto, type StopListEntryDto } from '@zapas/shared';
+import { daysWord, formatQty, type DishDto, type ProductDto, type StopForecastCoveredDto, type StopForecastDto, type StopListDto, type StopListEntryDto } from '@zapas/shared';
 import { Plus } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
 import { del, post } from '../../api/client';
@@ -18,6 +18,7 @@ import { useConfirm } from '../../components/Toast/Confirm';
 import { useToast } from '../../components/Toast/Toast';
 import { errorMessage } from '../../lib/errors';
 import { fmtDateTime } from '../../lib/format';
+import { describeIncoming } from '../../lib/incoming';
 import styles from './StopListPage.module.scss';
 
 type Source = 'all' | 'auto' | 'manual';
@@ -37,12 +38,12 @@ function etaTone(hours: number): Tone {
   return 'neutral';
 }
 
-function ForecastPanel({ items }: { items: StopForecastDto[] }) {
+export function ForecastPanel({ items }: { items: StopForecastDto[] }) {
   const shown = items.slice(0, FORECAST_SHOWN);
   return (
     <Panel
       title="Прогноз стоп-листа"
-      subtitle="Когда блюда перестанут готовиться при текущих продажах, если новых поставок не будет"
+      subtitle="Когда блюда перестанут готовиться при текущих продажах, с учётом поставок, которые уже едут"
     >
       <ul className={styles.forecast}>
         {shown.map((f) => (
@@ -55,9 +56,39 @@ function ForecastPanel({ items }: { items: StopForecastDto[] }) {
                   ? `закончится срок годности: ${f.limiting.productName}`
                   : `ограничивает ${f.limiting.productName}: осталось ${formatQty(f.limiting.availableNow, f.limiting.unit)}${f.limiting.perDay ? `, уходит около ${formatQty(Math.round(f.limiting.perDay * 10) / 10, f.limiting.unit)} в сутки` : ''}`}
               </span>
+              {f.incoming && (
+                <span className={f.incoming.afterStop ? styles.lateDelivery : styles.delivery}>
+                  {f.incoming.afterStop ? 'Поставка не успевает: ' : 'Едет поставка: '}
+                  {describeIncoming(f.incoming)}
+                </span>
+              )}
             </div>
             <span className={styles.eta} title={fmtDateTime(f.expectedAt)}>
               <Chip tone={etaTone(f.hoursLeft)}>{formatEta(f.hoursLeft)}</Chip>
+            </span>
+          </li>
+        ))}
+      </ul>
+      {items.length > shown.length && <p className={styles.more}>и ещё {items.length - shown.length}</p>}
+    </Panel>
+  );
+}
+
+/** Блюда, которым стоп не грозит только потому, что поставка уже едет. */
+export function CoveredPanel({ items }: { items: StopForecastCoveredDto[] }) {
+  const shown = items.slice(0, FORECAST_SHOWN);
+  return (
+    <Panel title="Выручит поставка" subtitle="Без неё эти блюда скоро остановились бы, а с ней стоп не грозит">
+      <ul className={styles.forecast}>
+        {shown.map((c) => (
+          <li key={`${c.dishId}|${c.locationId}`}>
+            <div>
+              <strong>{c.dishName}</strong>
+              <span className={styles.sub}>{c.locationName}</span>
+              <span className={styles.delivery}>{describeIncoming(c.incoming)}</span>
+            </div>
+            <span className={styles.eta}>
+              <Chip tone="ok">без неё {formatEta(c.hoursWithoutDelivery)}</Chip>
             </span>
           </li>
         ))}
@@ -185,6 +216,7 @@ export default function StopListPage() {
   const [adding, setAdding] = useState(false);
   const query = useGet<StopListDto>('/stop-list', { locationId: scope.locationId }, { refetchInterval: 60_000 });
   const forecast = useGet<StopForecastDto[]>('/stop-list/forecast', { locationId: scope.locationId }, { refetchInterval: 60_000 });
+  const covered = useGet<StopForecastCoveredDto[]>('/stop-list/covered', { locationId: scope.locationId }, { refetchInterval: 60_000 });
   const release = useAction((id: string) => del(`/stop-list/manual/${id}`), ['/stop-list', '/analytics']);
 
   useEffect(() => {
@@ -230,6 +262,15 @@ export default function StopListPage() {
                     <Chip tone="danger">
                       {m.name}: нужно {formatQty(m.required, m.unit)}, есть {formatQty(m.available, m.unit)}
                     </Chip>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {e.incoming && e.incoming.length > 0 && (
+              <ul className={styles.ingredients}>
+                {e.incoming.map((i) => (
+                  <li key={`${i.orderId}|${i.productId}`}>
+                    <Chip tone="ok">Едет: {describeIncoming(i)}</Chip>
                   </li>
                 ))}
               </ul>
@@ -301,6 +342,13 @@ export default function StopListPage() {
         <>
           <div style={{ height: 16 }} />
           <ForecastPanel items={forecast.data} />
+        </>
+      )}
+
+      {covered.data && covered.data.length > 0 && (
+        <>
+          <div style={{ height: 16 }} />
+          <CoveredPanel items={covered.data} />
         </>
       )}
 

@@ -37,6 +37,35 @@ export const registerBody = z
   });
 export type RegisterBody = z.infer<typeof registerBody>;
 
+// Подтверждение почты: код из письма. Включается, когда на сервере настроена отправка писем.
+
+export const EMAIL_CODE_LENGTH = 6;
+export const EMAIL_CODE_TTL_SECONDS = 900;
+export const EMAIL_CODE_MAX_ATTEMPTS = 5;
+export const EMAIL_CODE_RESEND_SECONDS = 30;
+
+export const verifyEmailBody = z.strictObject({
+  email,
+  code: z
+    .string()
+    .trim()
+    .regex(new RegExp(`^\\d{${EMAIL_CODE_LENGTH}}$`), `Код состоит из ${EMAIL_CODE_LENGTH} цифр`),
+});
+export type VerifyEmailBody = z.infer<typeof verifyEmailBody>;
+
+export const resendEmailBody = z.strictObject({ email });
+export type ResendEmailBody = z.infer<typeof resendEmailBody>;
+
+/** Ответ на регистрацию и на вход, когда почту нужно подтвердить: сессии ещё нет. */
+export interface EmailVerificationPendingDto {
+  emailVerificationRequired: true;
+  email: string;
+  /** Письмо с кодом ушло. Если нет, код можно запросить заново. */
+  delivered: boolean;
+  expiresIn: number;
+  resendAfter: number;
+}
+
 /** Организация, в которой лежат демо-данные и всё, что создано без явного указания организации. */
 export const DEFAULT_ORG_ID = '00000000-0000-4000-8000-000000000001';
 export const DEFAULT_ORG_NAME = 'Ресторанная группа «Набережная»';
@@ -98,6 +127,8 @@ export const createGuestOrderBody = z.strictObject({
   locationId: id,
   tableLabel: text(30),
   comment: note(300),
+  /** Когда заказ принят на самом деле, если он ушёл с задержкой (без связи). Сервер не принимает время из будущего и старше суток. */
+  placedAt: z.iso.datetime().optional(),
   lines: z
     .array(
       z.strictObject({
@@ -197,6 +228,8 @@ export interface GuestOrderDto {
   /** Сумма заказа без бесплатных переделок. */
   total: number;
   createdAt: string;
+  /** Заказ приняли раньше, чем он дошёл до сервера (официант был без связи). */
+  placedAt: string | null;
   acceptedAt: string | null;
   servedAt: string | null;
   cancelledAt: string | null;

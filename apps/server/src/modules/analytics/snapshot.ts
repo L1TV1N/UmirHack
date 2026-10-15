@@ -1,4 +1,4 @@
-import { addDays, daysBetween, toMilli, type SettingsBody } from '@zapas/shared';
+import { addDays, daysBetween, OPEN_ORDER_STATUSES, toMilli, type SettingsBody } from '@zapas/shared';
 import type { Db } from '../../db/client';
 import { hubFor } from '../../lib/events';
 import { SnapshotCache, UNKNOWN_OWNER, type CacheStats } from '../../lib/snapshot-cache';
@@ -6,6 +6,8 @@ import { sql } from 'kysely';
 import { observedDays, velocityFromWeightedSum } from '../../domain/forecast';
 import type { RecBatch, RecDish, RecLocation, RecProduct, RecVelocity } from '../../domain/recommendations';
 import { stockKey, type StockPoint } from '../../domain/stoplist';
+import { MIN_HOURLY_SALES } from '../../domain/hot-dishes';
+import type { IncomingDelivery } from '../../domain/stoplist-forecast';
 import type { Deps } from '../../lib/context';
 import { businessToday } from '../../lib/time';
 import { getSettings } from '../settings/settings';
@@ -33,7 +35,11 @@ export interface Snapshot {
   velocities: Map<string, RecVelocity>;
   /** Сколько порций блюда продаётся в сутки: ключи dishId|locationId. */
   dishDemand: Map<string, RecVelocity>;
+  /** Доли продаж блюда по часам суток (24 числа, сумма 1): ключи dishId|locationId. Только там, где продаж хватает для картины. */
+  dishHourly: Map<string, number[]>;
   stock: Map<string, StockPoint>;
+  /** Поставки в пути: отправленные заказы с известной датой и непринятым остатком. */
+  incoming: IncomingDelivery[];
 }
 
 const NO_ROWS = ['00000000-0000-0000-0000-000000000000'];
@@ -174,6 +180,23 @@ export async function loadSnapshot(deps: Deps, locationIds: string[] | null): Pr
     }
   }
 
+  // Поставки в пути. Дату берём ту, что обещал поставщик, а если её нет, желаемую дату заказа. Без даты поставку в расчёт не берём.
+  const incomingRows = await db
+    .selectFrom('purchase_order_lines as l')
+    .innerJoin('purchase_orders as o', 'o.id', 'l.order_id')
+    .innerJoin('products as p', 'p.id', 'l.product_id')
+    .select(['o.id as order_id', 'o.number', 'o.location_id', 'o.expected_on', 'o.delivery_on', 'l.product_id', 'l.quantity', 'l.received_qty', 'p.shelf_life_days'])
+    .where('o.status', 'in', [...OPEN_ORDER_STATUSES])
+    .$if(scope !== null, (qb) => qb.where('o.location_id', 'in', scope as string[]))
+    .execute();
+  const incoming: IncomingDelivery[] = [];
+  for (const r of incomingRows) {
+    const arrivesOn = r.delivery_on ?? r.expected_on;
+    const qtyMilli = toMilli(Number(r.quantity) - Number(r.received_qty));
+    if (!arrivesOn || qtyMilli <= 0) continue;
+    incoming.push({ orderId: r.order_id, orderNumber: r.number, productId: r.product_id, locationId: r.location_id, qtyMilli, arrivesOn, shelfLifeDays: r.shelf_life_days });
+  }
+
   const orgIds = [...new Set(locationRows.map((l) => l.org_id))];
   const dishRows = await db
     .selectFrom('dishes')
@@ -231,7 +254,32 @@ export async function loadSnapshot(deps: Deps, locationIds: string[] | null): Pr
     }
   }
 
-  return { seq, today, settings, locations, products, batches, tracked, dishes, velocities, dishDemand, stock };
+  // Когда блюдо обычно заказывают: доли продаж по часам суток. Считаем по документам, а не по ингредиентам,
+  // чтобы блюдо с десятью продуктами не весило больше блюда с двумя.
+  const dishHourly = new Map<string, number[]>();
+  if (dishes.length > 0) {
+    const rows = await sql<{ dish_id: string; location_id: string; hour: number; n: string }>`
+      SELECT dish_id, location_id, EXTRACT(HOUR FROM created_at AT TIME ZONE ${tz})::int AS hour, COUNT(DISTINCT document_id) AS n
+      FROM stock_movements
+      WHERE type = 'sale' AND dish_id IS NOT NULL
+        AND created_at >= ((${from}::date)::timestamp AT TIME ZONE ${tz})
+        AND created_at < ((${today}::date)::timestamp AT TIME ZONE ${tz})
+        ${scope !== null ? sql`AND location_id IN (${sql.join(scope.map((id) => sql`${id}::uuid`))})` : sql``}
+      GROUP BY dish_id, location_id, 3`.execute(db);
+    const acc = new Map<string, number[]>();
+    for (const r of rows.rows) {
+      const key = `${r.dish_id}|${r.location_id}`;
+      const hours = acc.get(key) ?? new Array<number>(24).fill(0);
+      hours[Math.min(23, Math.max(0, r.hour))] = Number(r.n);
+      acc.set(key, hours);
+    }
+    for (const [key, hours] of acc) {
+      const total = hours.reduce((a, b) => a + b, 0);
+      if (total >= MIN_HOURLY_SALES) dishHourly.set(key, hours.map((h) => h / total));
+    }
+  }
+
+  return { seq, today, settings, locations, products, batches, tracked, dishes, velocities, dishDemand, dishHourly, stock, incoming };
 }
 
 const MAX_SCOPES_PER_SNAPSHOT = 16;
@@ -264,6 +312,8 @@ export function restrictSnapshot(snap: Snapshot, ids: string[] | null): Snapshot
     tracked: new Set([...snap.tracked].filter(inScope)),
     velocities: pick(snap.velocities),
     stock: pick(snap.stock),
+    dishHourly: new Map([...snap.dishHourly].filter(([k]) => keep.has(k.split('|')[1] as string))),
+    incoming: snap.incoming.filter((i) => keep.has(i.locationId)),
   };
   if (byScope.size >= MAX_SCOPES_PER_SNAPSHOT) byScope.clear();
   byScope.set(key, narrowed);

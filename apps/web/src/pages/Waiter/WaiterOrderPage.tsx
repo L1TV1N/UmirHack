@@ -1,31 +1,58 @@
 import { formatMoney, type GuestOrderDetailDto, type WaiterDishDto } from '@zapas/shared';
 import { Flame, Minus, OctagonX, Plus, Search, Send } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { post } from '../../api/client';
-import { useAction, useGet } from '../../api/hooks';
+import { submitDocument } from '../../api/documents';
+import { useAction } from '../../api/hooks';
+import { useAuth } from '../../auth/AuthProvider';
 import { useScope } from '../../auth/ScopeProvider';
 import { Button } from '../../components/Button/Button';
 import { Input } from '../../components/Controls/Controls';
 import { EmptyState, ErrorNote, Loading } from '../../components/Feedback/Feedback';
 import { useToast } from '../../components/Toast/Toast';
 import { errorMessage } from '../../lib/errors';
+import { useWaiterGet } from '../../lib/useWaiterGet';
+import { OfflineEmpty, OfflineNote } from './OfflineNote';
 
 import styles from './Waiter.module.scss';
 
 /** Новый заказ: блюда из меню, блюда из стоп-листа выбрать нельзя. */
 export default function WaiterOrderPage() {
   const scope = useScope();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const toast = useToast();
   const locationId = scope.locationId ?? '';
-  const menu = useGet<WaiterDishDto[]>('/waiter/menu', { locationId }, { enabled: Boolean(locationId) });
+  const menu = useWaiterGet<WaiterDishDto[]>('/waiter/menu', { locationId }, { enabled: Boolean(locationId) });
   const [cart, setCart] = useState<Record<string, { qty: number; note: string }>>({});
   const [table, setTable] = useState('');
   const [comment, setComment] = useState('');
   const [q, setQ] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const send = useAction((body: object) => post<GuestOrderDetailDto>('/guest-orders', body), ['/guest-orders', '/waiter']);
+  // один ключ на заказ: если ответ потерялся или заказ ушёл в очередь, повторная отправка не создаст второй заказ
+  const orderKey = useRef(crypto.randomUUID());
+  const send = useAction(
+    (body: { tableLabel: string } & Record<string, unknown>) =>
+      submitDocument<GuestOrderDetailDto>((user as { id: string }).id, {
+        path: '/guest-orders',
+        body,
+        key: `order-${orderKey.current}`,
+        label: `Заказ, стол ${body.tableLabel}`,
+      }),
+    ['/guest-orders', '/waiter'],
+  );
+
+  // блюдо ушло в стоп-лист, пока заказ собирался: убираем его из заказа и говорим об этом, иначе сервер откажет при отправке
+  useEffect(() => {
+    const stopped = (menu.data ?? []).filter((d) => d.stopped && (cart[d.id]?.qty ?? 0) > 0);
+    if (stopped.length === 0) return;
+    setCart((c) => {
+      const next = { ...c };
+      for (const d of stopped) next[d.id] = { qty: 0, note: c[d.id]?.note ?? '' };
+      return next;
+    });
+    toast.error(`Убрано из заказа, блюдо в стоп-листе: ${stopped.map((d) => d.name).join(', ')}`);
+  }, [menu.data, cart, toast]);
 
   const shown = useMemo(() => {
     const list = menu.data ?? [];
@@ -51,10 +78,12 @@ export default function WaiterOrderPage() {
     if (!table.trim()) return setError('Укажите стол или номер заказа');
     if (lines.length === 0) return setError('Добавьте хотя бы одно блюдо');
     send.mutate(
-      { locationId, tableLabel: table.trim(), comment: comment.trim() || undefined, lines: lines.map(([dishId, v]) => ({ dishId, quantity: v.qty, ...(v.note.trim() ? { note: v.note.trim() } : {}) })) },
+      { locationId, tableLabel: table.trim(), placedAt: new Date().toISOString(), comment: comment.trim() || undefined, lines: lines.map(([dishId, v]) => ({ dishId, quantity: v.qty, ...(v.note.trim() ? { note: v.note.trim() } : {}) })) },
       {
-        onSuccess: (o) => {
-          toast.success(`Заказ ${o.number} принят`);
+        onSuccess: (res) => {
+          if (res.queued) toast.info('Нет связи: заказ сохранён на телефоне и уйдёт на кухню, как только связь вернётся');
+          else toast.success(`Заказ ${res.result.number} принят`);
+          orderKey.current = crypto.randomUUID();
           setCart({});
           setTable('');
           setComment('');
@@ -68,13 +97,15 @@ export default function WaiterOrderPage() {
     );
   };
 
-  if (menu.isLoading) return <Loading label="Загружаем меню" />;
+  if (menu.unreachable) return <OfflineEmpty what="меню" />;
+  if (menu.isLoading || (menu.data === undefined && !menu.error)) return <Loading label="Загружаем меню" />;
   if (menu.error) return <ErrorNote error={menu.error} onRetry={() => void menu.refetch()} />;
   if ((menu.data ?? []).length === 0) return <EmptyState title="Меню пусто">Блюда заводит менеджер в разделе «Блюда».</EmptyState>;
 
   return (
     <div className={styles.orderLayout}>
       <section className={styles.menu}>
+        <OfflineNote savedAt={menu.savedAt} />
         <div className={styles.search}>
           <Search size={16} aria-hidden="true" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Найти блюдо" aria-label="Найти блюдо" />

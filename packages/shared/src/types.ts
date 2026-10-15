@@ -44,7 +44,19 @@ export interface UserDto {
 
 /** Ответ на создание пользователя: временный пароль виден только здесь и только один раз. */
 export interface CreatedUserDto extends UserDto {
+  /** Показывается один раз. null, если пароль задан вручную или ушёл письмом. */
   temporaryPassword: string | null;
+  /** Письмо с приглашением и временным паролем отправлено. */
+  inviteSent: boolean;
+  /** Почему письмо не ушло (пароль тогда показан в ответе). */
+  inviteError: string | null;
+}
+
+/** Результат сброса пароля администратором. */
+export interface TemporaryPasswordDto {
+  temporaryPassword: string | null;
+  inviteSent: boolean;
+  inviteError: string | null;
 }
 
 export interface SessionDto {
@@ -295,6 +307,23 @@ export interface StopListEntryDto {
   manualId: string | null;
   until: string | null;
   createdBy: string | null;
+  /** Поставки, которые уже едут и закроют нехватку: заказ отправлен, срок известен. */
+  incoming?: IncomingInfoDto[];
+}
+
+/** Заказ поставщику, по которому товар ещё едет на точку. */
+export interface IncomingInfoDto {
+  orderId: string;
+  orderNumber: string;
+  productId: string;
+  productName: string;
+  unit: Unit;
+  /** Сколько ещё не принято по заказу. */
+  quantity: number;
+  /** Дата, на которую поставщик обещает привезти (или желаемая дата заказа). */
+  arrivesOn: string;
+  /** Привезут после остановки блюда: поставка не успевает. */
+  afterStop?: boolean;
 }
 
 export interface LowPortionDto {
@@ -324,6 +353,19 @@ export interface StopForecastDto {
     perPortion: number;
     perDay: number | null;
   };
+  /** Едущая поставка этого продукта, если она есть. Прогноз уже учитывает её: без неё блюдо остановилось бы раньше или вовсе. */
+  incoming?: IncomingInfoDto | null;
+}
+
+/** Блюдо, которое без поставки скоро остановилось бы, но поставка в пути успевает: пугать стопом не нужно. */
+export interface StopForecastCoveredDto {
+  dishId: string;
+  dishName: string;
+  locationId: string;
+  locationName: string;
+  /** Через сколько часов блюдо остановилось бы без этой поставки. */
+  hoursWithoutDelivery: number;
+  incoming: IncomingInfoDto;
 }
 
 /** Веса составляющих оценки поставщика, в сумме 1. Если составляющей нет (не было заказов), оценка считается по остальным. */
@@ -499,6 +541,12 @@ export interface HotDishDto {
   reasons: HotDishReasonDto[];
   headline: string;
   details: string;
+  /** Маржа порции по себестоимости рецептуры. null: у какого-то ингредиента нет себестоимости или у блюда нет цены. */
+  margin: { perPortion: number; rate: number; cost: number } | null;
+  /** Какая доля дневных продаж блюда обычно приходится на оставшуюся часть суток. null: истории продаж по часам мало. */
+  timeFit: number | null;
+  /** Во сколько раз маржа и время суток сдвинули приоритет относительно чистого расчёта по срокам и деньгам (1: не сдвинули). */
+  factors: { margin: number; time: number };
 }
 
 export interface HotDishesDto {

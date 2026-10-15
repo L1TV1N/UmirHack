@@ -1,0 +1,236 @@
+.page {
+  min-height: 100vh;
+  background: var(--surface-50, var(--surface-100));
+  color: var(--ink-900, inherit);
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 20px;
+  background: var(--fixed-dark);
+  color: var(--fixed-light);
+  font-weight: 600;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: inherit;
+  font-size: 18px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.main {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 20px 16px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.hero {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--brand-800);
+
+  h1 {
+    margin: 0;
+    font-size: 26px;
+    line-height: 1.2;
+    color: var(--ink-900, inherit);
+  }
+
+  p {
+    margin: 0;
+    color: var(--ink-700);
+    max-width: 56ch;
+  }
+}
+
+.state {
+  margin: 0;
+  padding: 24px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  text-align: center;
+  color: var(--ink-500);
+
+  p {
+    margin: 6px 0 0;
+  }
+}
+
+.venue {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-0, var(--surface-100));
+  overflow: hidden;
+
+  > header {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--line);
+
+    h2 {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    span,
+    small {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--ink-500);
+      font-size: 13.5px;
+    }
+  }
+
+  ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+}
+
+.offer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line-soft, var(--line));
+
+  &:last-child {
+    border-bottom: 0;
+  }
+
+  @media (max-width: 560px) {
+    grid-template-columns: 1fr auto;
+
+    .price {
+      grid-column: 1 / -1;
+      grid-row: 2;
+    }
+  }
+}
+
+.what {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sub {
+  color: var(--ink-500);
+  font-size: 13px;
+}
+
+.price {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+
+  b {
+    font-size: 18px;
+  }
+
+  s {
+    color: var(--ink-500);
+    font-size: 13px;
+  }
+
+  small {
+    color: var(--ink-500);
+  }
+}
+
+.foot {
+  margin: 0;
+  text-align: center;
+
+  button {
+    border: 0;
+    background: none;
+    color: var(--brand-700);
+    text-decoration: underline;
+    cursor: pointer;
+    font-size: 14px;
+  }
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hint {
+  margin: 0;
+  color: var(--ink-500);
+  font-size: 13.5px;
+}
+
+.total {
+  margin: 0;
+}
+
+.alert {
+  padding: 9px 12px;
+  border: 1px solid var(--danger-200);
+  border-radius: var(--radius);
+  background: var(--danger-50);
+  color: var(--danger-700, #b3261e);
+  font-size: 14px;
+}
+
+.okNote {
+  padding: 9px 12px;
+  border: 1px solid var(--ok-200, var(--brand-200));
+  border-radius: var(--radius);
+  background: var(--ok-50, var(--brand-50));
+  font-size: 14px;
+}
+
+// поле-ловушка для ботов: человек его не видит и до него не доберётся
+.trap {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.receipt {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: center;
+
+  p {
+    margin: 0;
+  }
+}
+
+.code {
+  display: block;
+  padding: 14px;
+  border: 2px dashed var(--brand-400);
+  border-radius: var(--radius);
+  background: var(--brand-50);
+  font-size: 36px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  font-variant-numeric: tabular-nums;
+}

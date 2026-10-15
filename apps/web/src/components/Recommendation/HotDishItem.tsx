@@ -25,6 +25,20 @@ export function HotDishItem({ dish, compact }: { dish: HotDishDto; compact?: boo
         <div className={styles.where}>
           {dish.locationName} · хватит на {dish.portions} порц. · продать около {dish.portionsToPush}
         </div>
+        {!compact && (dish.margin || dish.timeFit !== null) && (
+          <div className={styles.facts}>
+            {dish.margin && (
+              <Chip tone={dish.factors.margin > 1 ? 'ok' : dish.factors.margin < 1 ? 'amber' : 'neutral'} title={`${formatMoneyWhole(dish.margin.perPortion)} с порции при себестоимости ${formatMoneyWhole(dish.margin.cost)}`}>
+                Маржа {Math.round(dish.margin.rate * 100)}%
+              </Chip>
+            )}
+            {dish.timeFit !== null && (
+              <Chip tone={dish.factors.time < 1 ? 'amber' : 'neutral'} title="Какая доля дневных продаж блюда приходится на оставшиеся часы">
+                Впереди {Math.round(dish.timeFit * 100)}% продаж дня
+              </Chip>
+            )}
+          </div>
+        )}
         <ul className={styles.reasons}>
           {reasons.map((r) => (
             <li key={r.productId}>

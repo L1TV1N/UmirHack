@@ -25,6 +25,18 @@ function warmChunks(): void {
   else window.setTimeout(run, 3000);
 }
 
+/** Экраны официанта подгружаются заранее: без связи открыть вкладку, которую ещё не открывали, было бы нечем. */
+function warmWaiterChunks(): void {
+  const run = () => {
+    void import('../../pages/Waiter/WaiterOrderPage');
+    void import('../../pages/Waiter/WaiterOrdersPage');
+    void import('../../pages/Waiter/WaiterHotPage');
+    void import('../../pages/Waiter/WaiterStopPage');
+  };
+  if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(run, { timeout: 8000 });
+  else window.setTimeout(run, 3000);
+}
+
 /**
  * Связь и очередь документов. Пока связь есть и очередь пуста, не видно. Без связи показывает плашку, а
  * документы, оформленные в это время, ждут здесь и уходят сами при возвращении связи.
@@ -39,6 +51,7 @@ export function OfflineStatus() {
   const [open, setOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const userId = user?.id;
+  const role = user?.role;
   const waiting = items.filter((i) => !i.error).length;
   const waitingRef = useRef(waiting);
   waitingRef.current = waiting;
@@ -56,7 +69,7 @@ export function OfflineStatus() {
         const { toast: t, invalidate: refresh } = latest.current;
         if (res.sent > 0) {
           t.success(`Из очереди отправлено документов: ${res.sent}`);
-          void refresh(STOCK_PREFIXES);
+          void refresh([...STOCK_PREFIXES, '/guest-orders', '/waiter']);
         }
         if (res.rejected > 0) t.error(`Не приняты сервером: ${res.rejected}. Откройте очередь, чтобы разобраться`);
         if (manual && res.offline) t.error('Связи с сервером всё ещё нет');
@@ -71,16 +84,20 @@ export function OfflineStatus() {
   useEffect(() => {
     if (!userId) return;
     void loadOutbox().then(() => send(false));
-    void loadCatalog().then(() => refreshCatalog()).catch(() => undefined);
-    warmChunks();
-  }, [userId, send]);
+    // сканеру и формам документов нужен каталог, официанту нет: ему хватает меню на экране заказа
+    if (role === 'waiter') warmWaiterChunks();
+    else {
+      void loadCatalog().then(() => refreshCatalog()).catch(() => undefined);
+      warmChunks();
+    }
+  }, [userId, role, send]);
 
   // связь вернулась или пришло время повторить
   useEffect(() => {
     if (!userId) return;
     const onOnline = () => {
       void send(false);
-      void refreshCatalog().catch(() => undefined);
+      if (role !== 'waiter') void refreshCatalog().catch(() => undefined);
     };
     window.addEventListener('online', onOnline);
     const timer = window.setInterval(() => {
@@ -90,7 +107,7 @@ export function OfflineStatus() {
       window.removeEventListener('online', onOnline);
       window.clearInterval(timer);
     };
-  }, [userId, send]);
+  }, [userId, role, send]);
 
   if (!userId || (online && items.length === 0)) return null;
 
@@ -111,7 +128,7 @@ export function OfflineStatus() {
         open={open}
         onClose={() => setOpen(false)}
         title="Очередь документов"
-        subtitle={online ? 'Документы, оформленные без связи, отправляются сами' : 'Связи нет. Сканер и формы работают, документы уйдут, когда связь вернётся'}
+        subtitle={online ? 'Документы, оформленные без связи, отправляются сами' : role === 'waiter' ? 'Связи нет. Заказы сохраняются на телефоне и уйдут на кухню, когда связь вернётся' : 'Связи нет. Сканер и формы работают, документы уйдут, когда связь вернётся'}
         width={520}
         footer={
           <>

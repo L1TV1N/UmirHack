@@ -157,7 +157,7 @@ let histSeq = 0;
  */
 export async function seedSales(
   env: TestEnv,
-  o: { productId: string; locationId: string; days: number; perDay: number | ((age: number) => number); price?: number; cost?: number },
+  o: { productId: string; locationId: string; days: number; perDay: number | ((age: number) => number); price?: number; cost?: number; dishId?: string; hourUtc?: number },
 ): Promise<void> {
   const today = todayIn(env.config.businessTz, env.clock.now);
   const start = addDays(today, -o.days);
@@ -166,6 +166,7 @@ export async function seedSales(
   const total = sales.reduce((s, x) => s + x.qty, 0);
   const cost = o.cost ?? 60;
   const price = o.price ?? 100;
+  const saleTime = `T${String(o.hourUtc ?? 9).padStart(2, '0')}:00:00Z`;
 
   histSeq += 1;
   const receiptDoc = await env.owner
@@ -236,7 +237,7 @@ export async function seedSales(
         comment: null,
         idempotency_scope: null,
         idempotency_key: null,
-        created_at: new Date(`${s.date}T09:00:00Z`),
+        created_at: new Date(`${s.date}${saleTime}`),
       })
       .returning('id')
       .executeTakeFirstOrThrow();
@@ -252,10 +253,10 @@ export async function seedSales(
         unit_cost: cost,
         unit_price: price,
         reason: null,
-        dish_id: null,
+        dish_id: o.dishId ?? null,
         comment: null,
         created_by: null,
-        created_at: new Date(`${s.date}T09:00:00Z`),
+        created_at: new Date(`${s.date}${saleTime}`),
       })
       .execute();
   }

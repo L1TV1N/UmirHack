@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { computeHotDishes, MAX_PUSH_PORTIONS, MIN_PUSH_PORTIONS, type HotDish, type HotInput } from '../../src/domain/hot-dishes';
+import {
+  computeHotDishes,
+  dishMargin,
+  marginFactor,
+  MARGIN_FACTOR_MAX,
+  MARGIN_FACTOR_MIN,
+  MAX_PUSH_PORTIONS,
+  MIN_PUSH_PORTIONS,
+  remainingShare,
+  TIME_FACTOR_MIN,
+  timeFactor,
+  type HotDish,
+  type HotInput,
+} from '../../src/domain/hot-dishes';
 import type { RecBatch, RecLocation, RecProduct, RecVelocity } from '../../src/domain/recommendations';
 import { stockKey, type StockPoint } from '../../src/domain/stoplist';
 
@@ -260,5 +273,116 @@ describe('горячие предложения', () => {
       ]),
     });
     expect(list[0]?.dishName).toBe('Ходовое');
+  });
+});
+
+describe('маржа порции в горячих предложениях', () => {
+  const rich = (name: string, price: number): HotDish => ({ id: name, name, price, items: [{ productId: 'milk', qtyMilli: 100 }] });
+
+  it('считает маржу по себестоимости рецептуры', () => {
+    // 0,1 кг по 50 рублей = 5 рублей на порцию
+    const m = dishMargin({ id: 'd', name: 'Каша', price: 100, items: [{ productId: 'milk', qtyMilli: 100 }] }, products);
+    expect(m).toEqual({ perPortion: 95, rate: 0.95, cost: 5 });
+  });
+
+  it('без цены блюда или себестоимости ингредиента маржу не считает', () => {
+    expect(dishMargin({ id: 'd', name: 'Каша', price: 0, items: [{ productId: 'milk', qtyMilli: 100 }] }, products)).toBeNull();
+    const noCost = new Map(products);
+    noCost.set('milk', { ...products.get('milk')!, cost: 0 });
+    expect(dishMargin({ id: 'd', name: 'Каша', price: 100, items: [{ productId: 'milk', qtyMilli: 100 }] }, noCost)).toBeNull();
+    expect(marginFactor(null)).toBe(1);
+  });
+
+  it('убыточное блюдо получает нижнюю границу поправки, очень выгодное верхнюю, поправка не выходит за пределы', () => {
+    expect(marginFactor({ perPortion: -50, rate: 0, cost: 150 })).toBe(MARGIN_FACTOR_MIN);
+    expect(marginFactor({ perPortion: 100, rate: 1, cost: 0 })).toBe(MARGIN_FACTOR_MAX);
+    const mid = marginFactor({ perPortion: 50, rate: 0.5, cost: 50 });
+    expect(mid).toBeGreaterThan(MARGIN_FACTOR_MIN);
+    expect(mid).toBeLessThan(MARGIN_FACTOR_MAX);
+  });
+
+  it('без включения маржа приоритет не двигает и не показывается', () => {
+    const list = scene([batch('B1', 'milk', 2, 1)], [rich('Каша', 300)]);
+    expect(list[0]?.margin).toBeNull();
+    expect(list[0]?.factors).toEqual({ margin: 1, time: 1 });
+  });
+
+  it('из двух блюд с одинаковыми остатками выше то, где маржа больше, и маржа названа в описании', () => {
+    const batches = [batch('B1', 'milk', 1, 1), batch('B2', 'kefir', 1, 1)];
+    const cheap: HotDish = { id: 'd1', name: 'Дешёвое', price: 60, items: [{ productId: 'milk', qtyMilli: 100 }] };
+    const good: HotDish = { id: 'd2', name: 'Выгодное', price: 600, items: [{ productId: 'kefir', qtyMilli: 100 }] };
+    const list = scene(batches, [cheap, good], { useMargin: true });
+    const c = byName(list, 'Дешёвое')!;
+    const g = byName(list, 'Выгодное')!;
+    expect(g.factors.margin).toBeGreaterThan(c.factors.margin);
+    expect(g.priority).toBeGreaterThanOrEqual(c.priority);
+    expect(g.margin!.rate).toBeCloseTo(0.992, 3);
+    expect(g.details).toContain('Маржа порции 99%');
+  });
+
+  it('маржа меняет приоритет не больше чем на 15%', () => {
+    const batches = [batch('B1', 'milk', 1, 1)];
+    const off = scene(batches, [rich('Каша', 600)], { useMargin: false })[0]!;
+    const on = scene(batches, [rich('Каша', 600)], { useMargin: true })[0]!;
+    expect(on.priority).toBeLessThanOrEqual(Math.min(100, Math.round(off.priority * 1.15) + 1));
+    expect(on.priority).toBeGreaterThanOrEqual(Math.round(off.priority * 0.85) - 1);
+  });
+});
+
+describe('время суток в горячих предложениях', () => {
+  const morning = Array.from({ length: 24 }, (_, h) => (h >= 7 && h < 11 ? 0.25 : 0));
+  const evening = Array.from({ length: 24 }, (_, h) => (h >= 18 && h < 22 ? 0.25 : 0));
+
+  it('доля продаж впереди: считается от текущего часа до конца суток', () => {
+    expect(remainingShare(morning, 6)).toBeCloseTo(1);
+    expect(remainingShare(morning, 9.5)).toBeCloseTo(0.5);
+    expect(remainingShare(morning, 12)).toBe(0);
+    expect(remainingShare(evening, 12)).toBeCloseTo(1);
+  });
+
+  it('поправка: без данных нейтральна, блюдо, которое сегодня уже не купят, теряет приоритет, но не больше половины', () => {
+    expect(timeFactor(null, 0)).toBe(1);
+    expect(timeFactor(1, 0)).toBe(1);
+    expect(timeFactor(0, 0)).toBe(TIME_FACTOR_MIN);
+  });
+
+  it('если ингредиенты живут ещё несколько суток, время суток важно меньше', () => {
+    expect(timeFactor(0, 2)).toBeGreaterThan(timeFactor(0, 0));
+    expect(timeFactor(0, 2)).toBeCloseTo(1 - 0.5 / 3, 3);
+    expect(timeFactor(0, 30)).toBeGreaterThan(0.98);
+  });
+
+  it('утреннее блюдо вечером уступает вечернему при одинаковых остатках', () => {
+    const batches = [batch('B1', 'milk', 1, 0), batch('B2', 'kefir', 1, 0)];
+    const dishes = [dish('d1', 'Каша', [['milk', 0.1]]), dish('d2', 'Стейк', [['kefir', 0.1]])];
+    const hourly = new Map<string, readonly number[]>([
+      ['d1|K', morning],
+      ['d2|K', evening],
+    ]);
+    const list = scene(batches, dishes, { dishHourly: hourly, nowHour: 17 });
+    const kasha = byName(list, 'Каша')!;
+    const steak = byName(list, 'Стейк')!;
+    expect(kasha.timeFit).toBe(0);
+    expect(steak.timeFit).toBe(1);
+    expect(kasha.factors.time).toBe(TIME_FACTOR_MIN);
+    expect(steak.factors.time).toBe(1);
+    expect(steak.priority).toBeGreaterThan(kasha.priority);
+    expect(kasha.details).toContain('обычно заказывают раньше');
+    expect(steak.details).not.toContain('обычно заказывают раньше');
+  });
+
+  it('утром, наоборот, выше утреннее блюдо; без часового распределения блюдо не штрафуется', () => {
+    const batches = [batch('B1', 'milk', 1, 0), batch('B2', 'kefir', 1, 0)];
+    const dishes = [dish('d1', 'Каша', [['milk', 0.1]]), dish('d2', 'Стейк', [['kefir', 0.1]])];
+    const hourly = new Map<string, readonly number[]>([
+      ['d1|K', morning],
+      ['d2|K', evening],
+    ]);
+    const list = scene(batches, dishes, { dishHourly: hourly, nowHour: 6 });
+    expect(byName(list, 'Каша')!.priority).toBeGreaterThanOrEqual(byName(list, 'Стейк')!.priority);
+
+    const only = scene(batches, dishes, { dishHourly: new Map([['d1|K', morning]]), nowHour: 17 });
+    expect(byName(only, 'Стейк')!.timeFit).toBeNull();
+    expect(byName(only, 'Стейк')!.factors.time).toBe(1);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createGuestOrderBody, createUserBody, guestOrderStatusBody, hasRole, registerBody, reportIncidentBody, resolveIncidentBody, ROLES, ruDate, servesDishes, supplierStatusPush } from './index';
+import { createGuestOrderBody, createUserBody, resendEmailBody, verifyEmailBody, guestOrderStatusBody, hasRole, registerBody, reportIncidentBody, resolveIncidentBody, ROLES, ruDate, servesDishes, supplierStatusPush } from './index';
 
 const id = '11111111-1111-4111-8111-111111111111';
 
@@ -71,5 +71,17 @@ describe('обмен с кабинетом поставщика', () => {
   it('дата для людей', () => {
     expect(ruDate('2026-10-16')).toBe('16.10.2026');
     expect(ruDate('2026-10-16T09:00:00Z')).toBe('16.10.2026');
+  });
+});
+
+describe('подтверждение почты', () => {
+  it('код принимается только из шести цифр, пробелы по краям убираются, адрес приводится к нижнему регистру', () => {
+    expect(verifyEmailBody.safeParse({ email: 'Owner@Vkus.EXAMPLE', code: ' 012345 ' })).toMatchObject({ success: true, data: { email: 'owner@vkus.example', code: '012345' } });
+    for (const code of ['12345', '1234567', 'abcdef', '12 456', '']) expect(verifyEmailBody.safeParse({ email: 'a@b.ru', code }).success).toBe(false);
+  });
+
+  it('лишние поля отклоняются', () => {
+    expect(verifyEmailBody.safeParse({ email: 'a@b.ru', code: '123456', extra: 1 }).success).toBe(false);
+    expect(resendEmailBody.safeParse({ email: 'не-почта' }).success).toBe(false);
   });
 });

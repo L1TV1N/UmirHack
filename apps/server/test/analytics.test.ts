@@ -167,6 +167,37 @@ describe('горячие блюда', () => {
     expect((await hot(w.manager.token)).items).toHaveLength(0);
   });
 
+  it('маржа и время суток двигают приоритет, но в пределах разумного', async () => {
+    const milk = await addProduct(env, w.categoryId, { name: 'Молоко', unit: 'l', sellable: false, cost: 60 });
+    const beef = await addProduct(env, w.categoryId, { name: 'Говядина', unit: 'kg', sellable: false, cost: 60 });
+    const morning = await addDish(env, 'Каша манная', 160, [{ productId: milk, quantity: 0.2 }]);
+    const evening = await addDish(env, 'Стейк', 160, [{ productId: beef, quantity: 0.2 }]);
+    // часы бизнеса: Москва, в тесте сейчас 12:00. Утреннее блюдо продавали в 8, вечернее в 19
+    await seedSales(env, { productId: milk, locationId: w.kitchen.id, days: 25, perDay: 0.2, dishId: morning, hourUtc: 5 });
+    await seedSales(env, { productId: beef, locationId: w.kitchen.id, days: 25, perDay: 0.2, dishId: evening, hourUtc: 16 });
+    await receive(env, w.manager.token, w.kitchen.id, [{ productId: milk, quantity: 12, expiresOn: w.day(1) }]);
+    await receive(env, w.manager.token, w.kitchen.id, [{ productId: beef, quantity: 12, expiresOn: w.day(1) }]);
+
+    const res = await hot(w.manager.token);
+    const a = res.items.find((d: { dishName: string }) => d.dishName === 'Каша манная');
+    const b = res.items.find((d: { dishName: string }) => d.dishName === 'Стейк');
+    expect(a.timeFit).toBe(0);
+    expect(b.timeFit).toBe(1);
+    expect(a.factors.time).toBeLessThan(1);
+    expect(b.factors.time).toBe(1);
+    expect(b.priority).toBeGreaterThan(a.priority);
+    expect(a.details).toMatch(/обычно заказывают раньше/);
+    expect(b.margin).toMatchObject({ perPortion: 148, cost: 12 });
+    expect(b.margin.rate).toBeCloseTo(0.925, 3);
+
+    // в семь утра продажи каши ещё впереди, штрафа нет
+    env.clock.advance(-5 * 3600_000);
+    const early = await hot(w.manager.token);
+    const a2 = early.items.find((d: { dishName: string }) => d.dishName === 'Каша манная');
+    expect(a2.timeFit).toBe(1);
+    expect(a2.factors.time).toBe(1);
+  });
+
   it('кладовщик не видит чужую кухню, а панель отдаёт первые блюда', async () => {
     const milk = await addProduct(env, w.categoryId, { name: 'Молоко', unit: 'l', sellable: false, cost: 60 });
     await addDish(env, 'Каша манная', 160, [{ productId: milk, quantity: 0.2 }]);
@@ -203,6 +234,30 @@ describe('спасено уценкой', () => {
     // 5 л по 70 рублей, себестоимость 300, скидка стоила 150
     expect(r).toMatchObject({ days: 30, batches: 1, revenue: 350, cost: 300, discountGiven: 150 });
     expect(r.products[0]).toMatchObject({ productName: 'Молоко', quantity: 5, revenue: 350 });
+  });
+
+  it('выгрузка в CSV: строка по продукту, итог, права и запись в журнал', async () => {
+    const milk = await addProduct(env, w.categoryId, { name: 'Молоко', unit: 'l', price: 100, cost: 60 });
+    await receive(env, w.manager.token, w.locA.id, [{ productId: milk, quantity: 20, expiresOn: w.day(2), unitCost: 60 }]);
+    const batch = (await env.owner.selectFrom('batches').select('id').executeTakeFirstOrThrow()).id;
+    await call(env, w.manager.token)('POST', '/api/promotions', { batchId: batch, percent: 30 });
+    await buy(milk, 5);
+
+    const res = await call(env, w.manager.token)('GET', '/api/reports/rescued.csv?days=30');
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('text/csv');
+    expect(String(res.headers['content-disposition'])).toMatch(/rescued-30d-\d{4}-\d{2}-\d{2}\.csv/);
+    const lines = res.body.replace('\uFEFF', '').trim().split('\r\n');
+    expect(lines[0]).toBe('Продукт;Ед.;Продано по скидке;Выручка;Себестоимость;Выручка минус себестоимость');
+    expect(lines[1]).toBe('Молоко;л;5;350;300;50');
+    expect(lines[2]).toBe('Итого;;;350;300;50');
+
+    expect((await call(env, w.keeperA.token)('GET', '/api/reports/rescued.csv')).statusCode).toBe(403);
+    expect((await call(env, w.viewerA.token)('GET', '/api/reports/rescued.csv')).statusCode).toBe(403);
+    expect((await call(env, null)('GET', '/api/reports/rescued.csv')).statusCode).toBe(401);
+    expect((await call(env, w.manager.token)('GET', '/api/reports/rescued.csv?days=0')).statusCode).toBe(400);
+    const audit = await env.owner.selectFrom('audit_log').select(['entity_id', 'details']).where('action', '=', 'report.export').execute();
+    expect(audit.some((r) => r.entity_id === 'rescued')).toBe(true);
   });
 
   it('после отмены скидки продажи по обычной цене в отчёт не попадают', async () => {
@@ -273,6 +328,24 @@ describe('дефицитные ингредиенты', () => {
     const s = await stats(w.manager.token);
     expect(s.totals).toMatchObject({ refusedOrders: 1, lostRevenue: 800 });
     expect(s.ingredients[0]).toMatchObject({ productName: 'Молоко', refusedOrders: 1, lostRevenue: 800 });
+  });
+
+  it('выгрузка в CSV: ингредиент, итог и права', async () => {
+    const milk = await addProduct(env, w.categoryId, { name: 'Молоко', unit: 'l', sellable: false });
+    const dish = await addDish(env, 'Каша манная', 160, [{ productId: milk, quantity: 0.5 }]);
+    await receive(env, w.manager.token, w.kitchen.id, [{ productId: milk, quantity: 1, expiresOn: w.day(30) }]);
+    await order(dish, 5);
+
+    const res = await call(env, w.manager.token)('GET', '/api/reports/shortages.csv');
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('text/csv');
+    const lines = res.body.replace('\uFEFF', '').trim().split('\r\n');
+    expect(lines[0]).toBe('Продукт;Ед.;Нехваток;Часов без остатка;Блюд остановлено (максимум);Отклонено заказов;Потеряно выручки;Нехватка сейчас');
+    expect(lines[1]).toMatch(/^Молоко;л;\d+;[\d,]+;\d+;1;800;(да|нет)$/);
+    expect(lines.at(-1)).toMatch(/^Итого;;\d+;[\d,]+;;1;800;$/);
+    expect((await call(env, w.keeperA.token)('GET', '/api/reports/shortages.csv')).statusCode).toBe(403);
+    expect((await call(env, null)('GET', '/api/reports/shortages.csv')).statusCode).toBe(401);
+    expect((await call(env, w.manager.token)('GET', '/api/reports/shortages.csv?days=100')).statusCode).toBe(400);
   });
 
   it('учитывает период и точку, кладовщик не видит чужую кухню', async () => {

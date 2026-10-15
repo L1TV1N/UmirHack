@@ -16,6 +16,10 @@ const InventoryPage = lazy(() => import('../pages/Inventory/InventoryPage'));
 const StopListPage = lazy(() => import('../pages/StopList/StopListPage'));
 const RecommendationsPage = lazy(() => import('../pages/Recommendations/RecommendationsPage'));
 const HotDishesPage = lazy(() => import('../pages/HotDishes/HotDishesPage'));
+const WhatIfPage = lazy(() => import('../pages/WhatIf/WhatIfPage'));
+const AssistantPage = lazy(() => import('../pages/Assistant/AssistantPage'));
+const RescuePage = lazy(() => import('../pages/Rescue/RescuePage'));
+const StorefrontPage = lazy(() => import('../pages/Storefront/StorefrontPage'));
 const SuppliersPage = lazy(() => import('../pages/Suppliers/SuppliersPage'));
 const HaccpPage = lazy(() => import('../pages/Haccp/HaccpPage'));
 const GuidePage = lazy(() => import('../pages/Guide/GuidePage'));
@@ -29,6 +33,7 @@ const NotFoundPage = lazy(() => import('../pages/NotFound/NotFoundPage'));
 const RegisterPage = lazy(() => import('../pages/Login/RegisterPage'));
 const SelectLocationPage = lazy(() => import('../pages/Select/SelectLocationPage'));
 const ForcedPasswordPage = lazy(() => import('../pages/Login/ForcedPasswordPage'));
+const KitchenPage = lazy(() => import('../pages/Kitchen/KitchenPage'));
 const WaiterLayout = lazy(() => import('../pages/Waiter/WaiterLayout'));
 const WaiterOrderPage = lazy(() => import('../pages/Waiter/WaiterOrderPage'));
 const WaiterOrdersPage = lazy(() => import('../pages/Waiter/WaiterOrdersPage'));
@@ -76,6 +81,8 @@ export function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/rescue" element={<RescuePage />} />
+        <Route path="/rescue/:slug" element={<RescuePage />} />
         <Route
           path="/select"
           element={
@@ -101,6 +108,20 @@ export function App() {
           <Route path="hot" element={<WaiterHotPage />} />
           <Route path="stop" element={<WaiterStopPage />} />
         </Route>
+        <Route
+          path="/kitchen"
+          element={
+            <Protected>
+              <RoleSplit waiter={false}>
+                <RequireLocation>
+                  <RequireRole min="manager">
+                    <KitchenPage />
+                  </RequireRole>
+                </RequireLocation>
+              </RoleSplit>
+            </Protected>
+          }
+        />
         <Route
           element={
             <Protected>
@@ -145,6 +166,23 @@ export function App() {
           <Route path="haccp" element={<HaccpPage />} />
           <Route path="stop-list" element={<StopListPage />} />
           <Route path="hot-dishes" element={<HotDishesPage />} />
+          <Route
+            path="what-if"
+            element={
+              <RequireRole min="storekeeper">
+                <WhatIfPage />
+              </RequireRole>
+            }
+          />
+          <Route path="assistant" element={<AssistantPage />} />
+          <Route
+            path="storefront"
+            element={
+              <RequireRole min="storekeeper">
+                <StorefrontPage />
+              </RequireRole>
+            }
+          />
           <Route path="recommendations" element={<RecommendationsPage />} />
           <Route path="products" element={<ProductsPage />} />
           <Route path="dishes" element={<DishesPage />} />

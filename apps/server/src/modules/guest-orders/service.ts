@@ -16,7 +16,7 @@ import { sql, type Selectable, type Transaction } from 'kysely';
 import type { Database, GuestOrdersTable } from '../../db/types';
 import type { Actor, Deps, Principal } from '../../lib/context';
 import { actorName } from '../../lib/context';
-import { badRequest, conflict, forbidden, notFound, unprocessable } from '../../lib/errors';
+import { badRequest, conflict, forbidden, notFound, PG_UNIQUE_VIOLATION, pgCode, unprocessable } from '../../lib/errors';
 import { hubFor } from '../../lib/events';
 import { assertLocation, locationFilter } from '../../lib/scope';
 import { writeAudit } from '../audit/audit';
@@ -93,6 +93,7 @@ export async function toDtos(deps: Deps, rows: OrderRow[]): Promise<GuestOrderDt
       })),
       total: roundMoney(own.filter((l) => !l.is_remake).reduce((s, l) => s + Number(l.price) * l.quantity, 0)),
       createdAt: r.created_at.toISOString(),
+      placedAt: r.placed_at?.toISOString() ?? null,
       acceptedAt: r.accepted_at?.toISOString() ?? null,
       servedAt: r.served_at?.toISOString() ?? null,
       cancelledAt: r.cancelled_at?.toISOString() ?? null,
@@ -176,18 +177,54 @@ export async function openCount(deps: Deps, p: UserPrincipal): Promise<{ open: n
   return { open: Number(o.n), incidents: Number(i.n) };
 }
 
-export async function createOrder(deps: Deps, actor: Actor, body: CreateGuestOrderBody): Promise<GuestOrderDetailDto> {
+/** Задержка, после которой заказ считается принятым без связи и об этом пишется в ленту. */
+const LATE_AFTER_MS = 60_000;
+/** Заказ, принятый без связи, может прийти не позже, чем через сутки: дальше время мы уже не принимаем на веру. */
+const MAX_LATE_MS = 24 * 3600_000;
+
+/**
+ * Принимает заказ гостя. Ключ идемпотентности защищает от дубля, если ответ потерялся и официантский телефон
+ * отправил заказ из очереди повторно: тот же ключ того же официанта возвращает уже принятый заказ.
+ */
+export async function createOrder(deps: Deps, actor: Actor, body: CreateGuestOrderBody, key?: string): Promise<GuestOrderDetailDto> {
   const p = actor.principal as UserPrincipal;
   if (!canTakeOrders(p.role)) throw forbidden();
   assertLocation(p, body.locationId);
   const now = deps.clock();
+
+  if (key) {
+    const known = await deps.db.selectFrom('guest_orders').select('id').where('waiter_id', '=', p.id).where('client_key', '=', key).executeTakeFirst();
+    if (known) return getOrder(deps, p, known.id);
+  }
+  // время приёма берём у телефона, но в разумных пределах: не из будущего и не старше суток
+  const claimed = body.placedAt ? new Date(body.placedAt) : null;
+  const placedAt = claimed && now.getTime() - claimed.getTime() > LATE_AFTER_MS ? new Date(Math.max(claimed.getTime(), now.getTime() - MAX_LATE_MS)) : null;
 
   // блюдо из стоп-листа принять нельзя: официант увидит это ещё при выборе, здесь защита от устаревшего экрана
   const wanted = new Set(body.lines.map((l) => l.dishId));
   const stopped = (await getStopList(deps, [body.locationId])).entries.find((e) => e.entityType === 'dish' && wanted.has(e.entityId));
   if (stopped) throw conflict(`«${stopped.name}» в стоп-листе, принять заказ нельзя`, [{ dishId: stopped.entityId }], 'dish_stopped');
 
-  const id = await deps.db.transaction().execute(async (trx) => {
+  let id: string;
+  try {
+    id = await createOrderRow(deps, actor, p, body, key ?? null, placedAt, now);
+  } catch (err) {
+    // два одинаковых запроса одновременно: проиграл второй, отдаём то, что создал первый
+    if (key && pgCode(err) === PG_UNIQUE_VIOLATION) {
+      const known = await deps.db.selectFrom('guest_orders').select('id').where('waiter_id', '=', p.id).where('client_key', '=', key).executeTakeFirst();
+      if (known) return getOrder(deps, p, known.id);
+    }
+    throw err;
+  }
+  hubFor(deps.db).publish();
+  return getOrder(deps, p, id);
+}
+
+const clockOf = (deps: Deps, at: Date): string =>
+  new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: deps.config.businessTz }).format(at);
+
+async function createOrderRow(deps: Deps, actor: Actor, p: UserPrincipal, body: CreateGuestOrderBody, key: string | null, placedAt: Date | null, now: Date): Promise<string> {
+  return deps.db.transaction().execute(async (trx) => {
     const loc = await trx.selectFrom('locations').select(['id', 'kind', 'is_active', 'org_id']).where('id', '=', body.locationId).executeTakeFirst();
     if (!loc) throw notFound('Точка');
     if (!loc.is_active) throw unprocessable('Точка отключена', undefined, 'location_inactive');
@@ -208,6 +245,8 @@ export async function createOrder(deps: Deps, actor: Actor, body: CreateGuestOrd
         table_label: body.tableLabel,
         waiter_id: p.id,
         comment: body.comment ?? null,
+        client_key: key,
+        placed_at: placedAt,
         created_at: now,
         updated_at: now,
       })
@@ -225,12 +264,17 @@ export async function createOrder(deps: Deps, actor: Actor, body: CreateGuestOrd
         })),
       )
       .execute();
-    await addEvent(trx, order.id, 'created', `Заказ принят, стол ${body.tableLabel}`, actorName(p), now);
+    await addEvent(
+      trx,
+      order.id,
+      'created',
+      placedAt ? `Заказ принят в ${clockOf(deps, placedAt)} без связи, дошёл в ${clockOf(deps, now)}, стол ${body.tableLabel}` : `Заказ принят, стол ${body.tableLabel}`,
+      actorName(p),
+      now,
+    );
     await writeAudit(trx, { action: 'guest_order.create', entity: 'guest_order', entityId: order.id, principal: p, meta: actor.meta, at: now, details: { locationId: body.locationId, lines: body.lines.length } });
     return order.id;
   });
-  hubFor(deps.db).publish();
-  return getOrder(deps, p, id);
 }
 
 export async function changeStatus(

@@ -26,6 +26,7 @@ import { stockKey } from '../../domain/stoplist';
 import type { Deps, Principal } from '../../lib/context';
 import { notFound } from '../../lib/errors';
 import { assertLocation, locationFilter } from '../../lib/scope';
+import { businessHour } from '../../lib/time';
 import { getStopList } from '../stoplist/service';
 import { cachedAggregate, getSnapshot, scopeKey, type Snapshot } from './snapshot';
 
@@ -86,12 +87,12 @@ export async function getRecommendations(
 export const MAX_HOT_DISHES = 30;
 
 /** Горячие блюда для выбранных точек. Блюда и продукты из стоп-листа в список не попадают. */
-function hotDishesFrom(snap: Snapshot, stop: StopListDto, scopeIds: string[] | null): HotDishDto[] {
+export function hotDishesFrom(snap: Snapshot, stop: StopListDto, scopeIds: string[] | null, nowHour: number): HotDishDto[] {
   const blockedDishes = new Set<string>();
   const blockedProducts = new Set<string>();
   for (const e of stop.entries) (e.entityType === 'dish' ? blockedDishes : blockedProducts).add(`${e.entityId}|${e.locationId}`);
   return computeHotDishes(
-    { products: snap.products, locations: snap.locations, batches: snap.batches, velocities: snap.velocities, dishes: snap.dishes, dishDemand: snap.dishDemand, stock: snap.stock, blockedDishes, blockedProducts },
+    { products: snap.products, locations: snap.locations, batches: snap.batches, velocities: snap.velocities, dishes: snap.dishes, dishDemand: snap.dishDemand, dishHourly: snap.dishHourly, nowHour, useMargin: true, stock: snap.stock, blockedDishes, blockedProducts },
     { locationIds: scopeIds, limit: MAX_HOT_DISHES },
   );
 }
@@ -102,7 +103,7 @@ export async function getHotDishes(deps: Deps, principal: Principal, requestedLo
   const scopeIds = requestedLocation ? [requestedLocation] : allowed;
   const snap = await getSnapshot(deps, allowed);
   const stop = await getStopList(deps, scopeIds, snap);
-  return { asOf: deps.clock().toISOString(), locationId: requestedLocation ?? null, items: hotDishesFrom(snap, stop, scopeIds) };
+  return { asOf: deps.clock().toISOString(), locationId: requestedLocation ?? null, items: hotDishesFrom(snap, stop, scopeIds, businessHour(deps)) };
 }
 
 const BUCKETS: { key: ExpiryBucketDto['key']; label: string; test: (d: number) => boolean }[] = [
@@ -120,7 +121,7 @@ function inList(ids: string[]) {
   return sql`${sql.join(ids.map((id) => sql`${id}::uuid`))}`;
 }
 
-interface StockSummary {
+export interface StockSummary {
   stockValue: number;
   expiringSoonValue: number;
   expiringSoonBatches: number;
@@ -135,7 +136,7 @@ const MAX_SUMMARIES_PER_SNAPSHOT = 16;
 const summaries = new WeakMap<Snapshot, Map<string, StockSummary>>();
 
 /** Все суммы панели, зависящие только от среза. На больших данных это основная стоимость запроса, поэтому считаем раз на срез. */
-function summarize(snap: Snapshot, scopeIds: string[] | null): StockSummary {
+export function summarize(snap: Snapshot, scopeIds: string[] | null): StockSummary {
   const key = scopeKey(scopeIds);
   let byScope = summaries.get(snap);
   if (!byScope) {
@@ -299,7 +300,7 @@ export async function getDashboard(deps: Deps, principal: Principal, requestedLo
       .map(([reason, value]) => ({ reason, value: roundMoney(value) }))
       .sort((a, b) => b.value - a.value),
     topRisks: recs.slice(0, 6),
-    hotDishes: hotDishesFrom(snap, stopList, scopeIds).slice(0, 5),
+    hotDishes: hotDishesFrom(snap, stopList, scopeIds, businessHour(deps)).slice(0, 5),
     stopList: stopList.entries.slice(0, 8),
   };
 }

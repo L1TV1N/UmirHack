@@ -1,5 +1,7 @@
 import { formatMoneyWhole, formatQty, type RescuedStatsDto } from '@zapas/shared';
 import { useGet } from '../../api/hooks';
+import { useAuth } from '../../auth/AuthProvider';
+import { ExportButton } from '../../components/ExportButton/ExportButton';
 import { ErrorNote, Loading } from '../../components/Feedback/Feedback';
 import { Panel } from '../../components/Panel/Panel';
 import styles from './RescuedPanel.module.scss';
@@ -9,10 +11,15 @@ const DAYS = 30;
 /** Сколько выручили с товара, который успели продать по скидке до конца срока. */
 export function RescuedPanel({ locationId }: { locationId: string | undefined }) {
   const query = useGet<RescuedStatsDto>('/analytics/rescued', { locationId, days: DAYS }, { refetchInterval: 120_000 });
+  const { can } = useAuth();
   const d = query.data;
 
   return (
-    <Panel title="Спасено уценкой" subtitle={`За ${DAYS} дней: товар, проданный со скидкой до конца срока, вместо списания`}>
+    <Panel
+      title="Спасено уценкой"
+      subtitle={`За ${DAYS} дней: товар, проданный со скидкой до конца срока, вместо списания`}
+      actions={can('manager') && d && d.batches > 0 ? <ExportButton path="/reports/rescued.csv" query={{ locationId, days: DAYS }} filename="rescued.csv" /> : undefined}
+    >
       {query.isLoading && <Loading />}
       {query.isError && (
         <div style={{ padding: 16 }}>

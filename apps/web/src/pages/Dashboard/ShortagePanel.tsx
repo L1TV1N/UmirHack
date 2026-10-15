@@ -1,5 +1,7 @@
 import { formatMoneyWhole, plural, type ShortageStatsDto } from '@zapas/shared';
 import { useGet } from '../../api/hooks';
+import { useAuth } from '../../auth/AuthProvider';
+import { ExportButton } from '../../components/ExportButton/ExportButton';
 import { Chip } from '../../components/Chip/Chip';
 import { ErrorNote, Loading } from '../../components/Feedback/Feedback';
 import { Panel } from '../../components/Panel/Panel';
@@ -16,11 +18,16 @@ function formatHours(hours: number): string {
 
 export function ShortagePanel({ locationId }: { locationId: string | undefined }) {
   const query = useGet<ShortageStatsDto>('/analytics/shortages', { locationId, days: DAYS }, { refetchInterval: 120_000 });
+  const { can } = useAuth();
   const d = query.data;
   const max = Math.max(1, ...(d?.ingredients.map((i) => i.hours) ?? [0]));
 
   return (
-    <Panel title="Дефицитные ингредиенты" subtitle={`За ${DAYS} дней: сколько времени продукт не давал готовить блюда`}>
+    <Panel
+      title="Дефицитные ингредиенты"
+      subtitle={`За ${DAYS} дней: сколько времени продукт не давал готовить блюда`}
+      actions={can('manager') && d && d.ingredients.length > 0 ? <ExportButton path="/reports/shortages.csv" query={{ locationId, days: DAYS }} filename="shortages.csv" /> : undefined}
+    >
       {query.isLoading && <Loading />}
       {query.isError && (
         <div style={{ padding: 16 }}>

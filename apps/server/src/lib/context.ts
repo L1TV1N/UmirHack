@@ -6,6 +6,7 @@ import type { InvoiceReader } from '../modules/invoices/reader';
 import type { WebhookSender } from '../modules/integrations/sender';
 import type { ExchangeTransport } from '../modules/exchange/transport';
 import type { WeatherProvider } from '../modules/forecast/weather';
+import type { QuestionPlanner } from '../modules/assistant/planner';
 import type { Mailer } from '../modules/orders/mailer';
 import type { TelegramApi } from '../modules/telegram/api';
 import type { SupplierPortal } from '../modules/supplier-portal/client';
@@ -32,6 +33,8 @@ export interface Deps {
   codeSender?: Pick<TelegramApi, 'sendMessage'> | null;
   /** Чтение накладных с фото (нужен ключ GigaChat). Если его нет, загрузка фото выключена. */
   invoiceReader?: InvoiceReader | null;
+  /** Разбор вопросов помощника (нужен ключ GigaChat). Нет: вопросы разбирают простые правила. */
+  questionPlanner?: QuestionPlanner | null;
   /** Отправка вебхуков. Нет: события копятся в очереди, но не уходят. */
   webhookSender?: WebhookSender | null;
   /** Обмен с учётными системами (1С, iiko). Нет: задания копятся в очереди, но не уходят. */
@@ -72,6 +75,9 @@ export type Principal =
       orgId: null;
       locationIds: 'all';
     };
+
+/** Вошедший сотрудник (не ключ кассы и не система). */
+export type UserPrincipal = Extract<Principal, { kind: 'user' }>;
 
 export interface RequestMeta {
   ip: string | null;

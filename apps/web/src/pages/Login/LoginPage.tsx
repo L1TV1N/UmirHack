@@ -1,4 +1,4 @@
-import { loginBody, type TwoFactorChallengeDto } from '@zapas/shared';
+import { loginBody, type EmailVerificationPendingDto, type TwoFactorChallengeDto } from '@zapas/shared';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, Navigate, useLocation } from 'react-router';
 import { ApiError } from '../../api/client';
@@ -10,11 +10,12 @@ import { Field, Input } from '../../components/Controls/Controls';
 import { BrandMark } from '../../components/Layout/Brand';
 import { usePortalLink } from '../../lib/usePortalLink';
 import { TeamMark } from '../../components/TeamBanner/TeamMark';
+import { EmailCodeStep } from './EmailCodeStep';
 import { TwoFactorStep } from './TwoFactorStep';
 import styles from './LoginPage.module.scss';
 
 export default function LoginPage() {
-  const { status, login, verifyTwoFactor, resendTwoFactor, sessionEnded } = useAuth();
+  const { status, login, verifyTwoFactor, resendTwoFactor, verifyEmail, resendEmail, sessionEnded } = useAuth();
   const scope = useScope();
   const portal = usePortalLink();
   const location = useLocation();
@@ -24,6 +25,7 @@ export default function LoginPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [challenge, setChallenge] = useState<TwoFactorChallengeDto | null>(null);
+  const [mailCheck, setMailCheck] = useState<EmailVerificationPendingDto | null>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -52,7 +54,8 @@ export default function LoginPage() {
       const pending = await login(parsed.data.email, parsed.data.password);
       if (pending) {
         setPassword('');
-        setChallenge(pending);
+        if ('emailVerificationRequired' in pending) setMailCheck(pending);
+        else setChallenge(pending);
       }
     } catch (err) {
       // после неудачи пароль стирается, и фокус сразу в поле: исправить опечатку можно без лишних кликов
@@ -92,7 +95,14 @@ export default function LoginPage() {
       </section>
 
       <section className={styles.formSide}>
-        {challenge ? (
+        {mailCheck ? (
+          <EmailCodeStep
+            pending={mailCheck}
+            onVerify={(code) => verifyEmail(mailCheck.email, code)}
+            onResend={() => resendEmail(mailCheck.email)}
+            onBack={() => setMailCheck(null)}
+          />
+        ) : challenge ? (
           <TwoFactorStep
             challenge={challenge}
             onVerify={(code) => verifyTwoFactor(challenge.challengeId, code)}

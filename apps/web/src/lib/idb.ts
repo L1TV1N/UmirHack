@@ -2,7 +2,7 @@
  * Маленькое хранилище «ключ → значение» поверх IndexedDB. Если браузер его не даёт (приватный режим, тесты),
  * данные живут в памяти до перезагрузки страницы: приложение от этого не ломается, только не работает офлайн.
  */
-export type StoreName = 'catalog' | 'outbox';
+export type StoreName = 'catalog' | 'outbox' | 'waiter';
 
 export interface Store {
   get<T>(key: string): Promise<T | undefined>;
@@ -13,7 +13,7 @@ export interface Store {
 }
 
 const DB_NAME = 'zapas';
-const STORES: StoreName[] = ['catalog', 'outbox'];
+const STORES: StoreName[] = ['catalog', 'outbox', 'waiter'];
 
 let dbPromise: Promise<IDBDatabase | null> | null = null;
 
@@ -21,7 +21,7 @@ function openDb(): Promise<IDBDatabase | null> {
   dbPromise ??= new Promise((resolve) => {
     try {
       if (typeof indexedDB === 'undefined') return resolve(null);
-      const request = indexedDB.open(DB_NAME, 1);
+      const request = indexedDB.open(DB_NAME, 2);
       request.onupgradeneeded = () => {
         for (const name of STORES) if (!request.result.objectStoreNames.contains(name)) request.result.createObjectStore(name);
       };

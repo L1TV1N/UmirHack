@@ -3,6 +3,7 @@ import {
   createUserBody,
   idParam,
   setPasswordBody,
+  temporaryPasswordBody,
   updateUserBody,
   usersQuery,
   type CreatedUserDto,
@@ -17,6 +18,7 @@ import { asUser, requireUser } from '../../plugins/access';
 import { orgOf } from '../../lib/scope';
 import { dropTelegramAccess } from '../telegram/links';
 import { writeAudit } from '../audit/audit';
+import { sendTemporaryPassword } from '../auth/invite';
 import { generatePassword, hashPassword } from '../auth/password';
 import { clearTwoFactor, notifyUser } from '../auth/two-factor';
 import { loadLocationIds, toUserDto, type UserRow } from './users';
@@ -62,6 +64,9 @@ export const userRoutes =
         throw conflict('Нельзя отключить или понизить последнего администратора', undefined, 'last_admin');
       }
     }
+
+    const orgName = async (id: string): Promise<string> =>
+      (await db.selectFrom('organizations').select('name').where('id', '=', id).executeTakeFirst())?.name ?? 'ваша организация';
 
     app.get('/users', { config: asUser('admin'), schema: { querystring: usersQuery } }, async (req) => {
       const { q, limit, offset } = req.query;
@@ -130,7 +135,12 @@ export const userRoutes =
           });
           return created;
         });
-        const dto: CreatedUserDto = { ...(await toDto(row)), temporaryPassword: temporary };
+        // пароль уходит письмом, если почта настроена; при сбое или без почты администратор видит его на экране
+        const invite =
+          temporary !== null && body.sendInvite !== false
+            ? await sendTemporaryPassword(deps, { email: row.email, fullName: row.full_name, organizationName: await orgName(orgId) }, temporary, 'invite')
+            : { sent: false, error: null };
+        const dto: CreatedUserDto = { ...(await toDto(row)), temporaryPassword: invite.sent ? null : temporary, inviteSent: invite.sent, inviteError: invite.error };
         return reply.status(201).send(dto);
       } catch (err) {
         if (pgCode(err) === PG_UNIQUE_VIOLATION) throw conflict('Пользователь с таким email уже есть', undefined, 'duplicate_email');
@@ -243,6 +253,31 @@ export const userRoutes =
         return reply.status(204).send();
       },
     );
+
+    // Новый временный пароль: уходит письмом, а если почты нет или она не доставила, виден администратору один раз
+    app.post('/users/:id/temporary-password', { config: asUser('admin'), schema: { params: idParam, body: temporaryPasswordBody } }, async (req) => {
+      const principal = requireUser(req);
+      const now = deps.clock();
+      const target = await db.selectFrom('users').select(['id', 'email', 'full_name']).where('id', '=', req.params.id).where('org_id', '=', orgOf(principal)).executeTakeFirst();
+      if (!target) throw notFound('Пользователь');
+      const temporary = generatePassword({ email: target.email, fullName: target.full_name });
+      const passwordHash = await hashPassword(temporary);
+      await db.transaction().execute(async (trx) => {
+        await trx
+          .updateTable('users')
+          .set({ password_hash: passwordHash, password_changed_at: now, failed_attempts: 0, locked_until: null, must_change_password: true, updated_at: now })
+          .where('id', '=', target.id)
+          .execute();
+        await trx.updateTable('refresh_tokens').set({ revoked_at: now }).where('user_id', '=', target.id).where('revoked_at', 'is', null).execute();
+        await dropTelegramAccess(trx, target.id, { keepForTwoFactor: true });
+        await writeAudit(trx, { action: 'user.password_reset', entity: 'user', entityId: target.id, principal, meta: req.meta, at: now, details: { byEmail: req.body.sendInvite !== false } });
+      });
+      const invite =
+        req.body.sendInvite !== false
+          ? await sendTemporaryPassword(deps, { email: target.email, fullName: target.full_name, organizationName: await orgName(orgOf(principal)) }, temporary, 'reset')
+          : { sent: false, error: null };
+      return { temporaryPassword: invite.sent ? null : temporary, inviteSent: invite.sent, inviteError: invite.error };
+    });
 
     app.post('/users/:id/unlock', { config: asUser('admin'), schema: { params: idParam } }, async (req) => {
       const principal = requireUser(req);

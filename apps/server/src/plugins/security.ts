@@ -63,8 +63,12 @@ export const securityPlugin = fp<{ config: Config }>(async (app: FastifyInstance
     reply.header('Permissions-Policy', PERMISSIONS_POLICY);
     reply.header('X-Request-Id', req.id);
     if (req.url.startsWith('/api')) {
-      reply.header('Cache-Control', 'no-store');
-      reply.header('Pragma', 'no-cache');
+      // публичная витрина (только чтение) может недолго кешироваться, всё остальное нет; ответ маршрута её выставляет сам
+      const shared = req.method === 'GET' && req.url.startsWith('/api/public/') && String(reply.getHeader('Cache-Control') ?? '').startsWith('public');
+      if (!shared) {
+        reply.header('Cache-Control', 'no-store');
+        reply.header('Pragma', 'no-cache');
+      }
     }
   });
 });

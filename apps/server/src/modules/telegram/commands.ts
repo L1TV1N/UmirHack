@@ -7,12 +7,14 @@ import {
   hasRole,
   plural,
   ROLE_LABELS,
+  ruDate,
   type Role,
   type StockRowDto,
 } from '@zapas/shared';
 import type { Deps, Principal } from '../../lib/context';
 import { locationFilter } from '../../lib/scope';
 import { getHotDishes, getRecommendations } from '../analytics/service';
+import { ask } from '../assistant/service';
 import { buildDigest } from '../notifications/digest';
 import { escapeHtml } from '../notifications/notifier';
 import { stockSummary } from '../stock/queries';
@@ -20,6 +22,7 @@ import { getStopForecast, getStopList } from '../stoplist/service';
 import type { UserRow } from '../users/users';
 import { encodeAction } from './actions';
 import type { Buttons } from './api';
+import { BOT_META } from './links';
 import { subscriptionsView, topicsOf } from './subscriptions';
 
 export interface CommandContext {
@@ -100,6 +103,7 @@ export const HELP_TEXT = [
   '/stoplist - стоп-лист и прогноз, когда блюда закончатся',
   '/hot - горячие предложения: какие блюда продвигать',
   '/subscribe - на какие уведомления вы подписаны',
+  '/ask что в стоп-листе? - вопрос своими словами (можно просто написать боту)',
   '/stock молоко - остатки продукта по точкам',
   '/expiring - что скоро истекает',
   '/expired - просрочено, ждёт списания',
@@ -222,8 +226,11 @@ async function stopList(ctx: CommandContext, args: string): Promise<string> {
   const forecastLines = forecast.length
     ? [
         '',
-        '<b>Прогноз: остановятся без новой поставки</b>',
-        ...forecast.map((f) => `• ${e(f.dishName)}, ${e(f.locationName)}: ${eta(f.hoursLeft)}, ${f.cause === 'expiry' ? 'истечёт срок' : 'не хватит'}: ${e(f.limiting.productName)}`),
+        '<b>Прогноз: остановятся, если не будет новой поставки</b>',
+        ...forecast.map(
+          (f) =>
+            `• ${e(f.dishName)}, ${e(f.locationName)}: ${eta(f.hoursLeft)}, ${f.cause === 'expiry' ? 'истечёт срок' : 'не хватит'}: ${e(f.limiting.productName)}${f.incoming ? (f.incoming.afterStop ? `. Поставка ${ruDate(f.incoming.arrivesOn)} не успевает` : `. Поставка ${ruDate(f.incoming.arrivesOn)} продлит срок`) : ''}`,
+        ),
       ]
     : [];
   if (list.entries.length === 0 && list.warnings.length === 0) return fit([`${scoped('Стоп-лист', scope)}: пусто, всё есть в наличии.`, ...forecastLines]);
@@ -234,7 +241,8 @@ async function stopList(ctx: CommandContext, args: string): Promise<string> {
   for (const s of shown) {
     const kind = s.entityType === 'dish' ? 'блюдо' : 'продукт';
     const reason = s.reasons[0]?.text ?? '';
-    lines.push(`• <b>${e(s.name)}</b> (${kind}), ${e(s.locationName)}: ${e(reason)}, с ${clock(s.since, tz)}`);
+    const arriving = s.incoming?.[0];
+    lines.push(`• <b>${e(s.name)}</b> (${kind}), ${e(s.locationName)}: ${e(reason)}, с ${clock(s.since, tz)}${arriving ? `. Едет поставка ${ruDate(arriving.arrivesOn)}: ${e(arriving.productName)}` : ''}`);
   }
   lines.push(...more(shown.length, list.entries.length));
   if (list.warnings.length > 0) {
@@ -293,6 +301,16 @@ export function greeting(ctx: CommandContext): string {
   return `Здравствуйте! Вы вошли как ${whoami(ctx)}\n\n${HELP_TEXT}`;
 }
 
+/** Вопрос помощнику своими словами. Он только читает данные и отвечает тем, что нашёл в системе. */
+export async function askAssistant(ctx: CommandContext, question: string): Promise<Reply> {
+  if (!question) return { text: 'Напишите вопрос после команды, например: <code>/ask что в стоп-листе?</code>' };
+  if (question.length > 300 || hasForbiddenChars(question)) return { text: 'Не понял вопрос. Сформулируйте короче, обычными словами.' };
+  const a = await ask(ctx.deps, ctx.principal, { question }, BOT_META);
+  const lines = [`<b>${e(a.title)}</b>`, ...a.lines.map((l) => e(l))];
+  if (a.intent === null) lines.push('', 'Например:', ...a.suggestions.map((x) => `- ${e(x)}`), '', 'Список команд: /help');
+  return { text: fit(lines) };
+}
+
 /** Выполняет команду от имени привязанного пользователя. Привязку и отвязку обрабатывает бот. */
 export async function runCommand(ctx: CommandContext, cmd: ParsedCommand): Promise<Reply | null> {
   const plain = async (text: Promise<string> | string): Promise<Reply> => ({ text: await text });
@@ -311,6 +329,8 @@ export async function runCommand(ctx: CommandContext, cmd: ParsedCommand): Promi
       return plain(stopList(ctx, cmd.args));
     case 'hot':
       return hot(ctx, cmd.args);
+    case 'ask':
+      return askAssistant(ctx, cmd.args);
     case 'subscribe':
     case 'settings':
       return subscribe(ctx);
@@ -339,6 +359,7 @@ export const MENU_COMMANDS = [
   { command: 'stoplist', description: 'Стоп-лист и прогноз' },
   { command: 'hot', description: 'Горячие предложения' },
   { command: 'subscribe', description: 'Уведомления' },
+  { command: 'ask', description: 'Вопрос своими словами' },
   { command: 'stock', description: 'Остатки продукта: /stock молоко' },
   { command: 'expiring', description: 'Скоро истекает' },
   { command: 'expired', description: 'Просрочено' },

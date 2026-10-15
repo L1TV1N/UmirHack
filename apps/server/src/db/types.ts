@@ -15,6 +15,7 @@ export interface UsersTable {
   must_change_password: Generated<boolean>;
   two_factor_enabled: Generated<boolean>;
   two_factor_enabled_at: TimestampNullable;
+  email_verified_at: TimestampNullable;
   email: string;
   full_name: string;
   password_hash: string;
@@ -26,6 +27,17 @@ export interface UsersTable {
   last_login_at: TimestampNullable;
   created_at: Timestamp;
   updated_at: Timestamp;
+}
+
+export interface EmailCodesTable {
+  id: Generated<string>;
+  user_id: string;
+  code_hash: string;
+  attempts: Generated<number>;
+  created_at: Timestamp;
+  last_sent_at: Timestamp;
+  expires_at: Timestamp;
+  consumed_at: TimestampNullable;
 }
 
 export interface LoginChallengesTable {
@@ -76,6 +88,9 @@ export interface LocationsTable {
   latitude: ColumnType<string | null, number | string | null | undefined, number | string | null>;
   longitude: ColumnType<string | null, number | string | null | undefined, number | string | null>;
   is_active: Generated<boolean>;
+  storefront_enabled: Generated<boolean>;
+  storefront_slug: ColumnType<string | null, string | null | undefined, string | null>;
+  storefront_note: ColumnType<string | null, string | null | undefined, string | null>;
   created_at: Timestamp;
 }
 
@@ -250,6 +265,36 @@ export interface StockMovementsTable {
   comment: string | null;
   created_by: string | null;
   created_at: Timestamp;
+}
+
+export interface StorefrontOffersTable {
+  id: Generated<string>;
+  batch_id: string;
+  location_id: string;
+  quantity: Numeric;
+  per_guest_max: Generated<number>;
+  created_by: string | null;
+  created_at: Timestamp;
+  closed_at: TimestampNullable;
+}
+
+export interface StorefrontReservationsTable {
+  id: Generated<string>;
+  offer_id: string;
+  location_id: string;
+  code: string;
+  quantity: Numeric;
+  guest_name: string | null;
+  guest_phone: string | null;
+  phone_hash: string;
+  ip_hash: string | null;
+  status: Generated<'reserved' | 'picked_up' | 'cancelled' | 'expired'>;
+  created_at: Timestamp;
+  expires_at: Timestamp;
+  closed_at: TimestampNullable;
+  closed_by: string | null;
+  document_id: string | null;
+  cancel_reason: string | null;
 }
 
 export interface PromotionsTable {
@@ -476,6 +521,8 @@ export interface GuestOrdersTable {
   comment: string | null;
   document_id: string | null;
   cancel_reason: string | null;
+  client_key: string | null;
+  placed_at: TimestampNullable;
   created_at: Timestamp;
   updated_at: Timestamp;
   accepted_at: TimestampNullable;
@@ -642,6 +689,9 @@ export interface Database {
   pos_code_map: PosCodeMapTable;
   users: UsersTable;
   login_challenges: LoginChallengesTable;
+  storefront_offers: StorefrontOffersTable;
+  storefront_reservations: StorefrontReservationsTable;
+  email_codes: EmailCodesTable;
   recovery_codes: RecoveryCodesTable;
   locations: LocationsTable;
   user_locations: UserLocationsTable;

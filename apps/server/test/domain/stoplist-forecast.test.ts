@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RecBatch, RecLocation, RecProduct, RecVelocity } from '../../src/domain/recommendations';
-import { forecastStopList, type ForecastDish, type StopForecastInput } from '../../src/domain/stoplist-forecast';
+import { forecastStopList, forecastStopListDetailed, type ForecastDish, type IncomingDelivery, type StopForecastInput } from '../../src/domain/stoplist-forecast';
 import { stockKey, type StockPoint } from '../../src/domain/stoplist';
 
 const kitchen: RecLocation = { id: 'K', name: 'Кухня', kind: 'kitchen', isActive: true };
@@ -94,5 +94,101 @@ describe('прогноз стоп-листа', () => {
     );
     expect(list.map((f) => f.dishName)).toEqual(['Каша', 'Борщ', 'Блины']);
     for (let i = 1; i < list.length; i += 1) expect(list[i]!.hoursLeft).toBeGreaterThanOrEqual(list[i - 1]!.hoursLeft);
+  });
+});
+
+describe('прогноз стоп-листа с поставками в пути', () => {
+  const milk = { productId: 'milk', locationId: 'K' };
+  const delivery = (over: Partial<IncomingDelivery> = {}): IncomingDelivery => ({
+    orderId: 'o1',
+    orderNumber: 'ЗК-000100',
+    ...milk,
+    qtyMilli: 20_000,
+    arrivesOn: '2026-10-11',
+    shelfLifeDays: null,
+    ...over,
+  });
+  const run = (incoming: IncomingDelivery[], batches: RecBatch[] = [batch('B1', 'milk', 4, 30)], extra: Partial<StopForecastInput> = {}) => {
+    const stock = new Map<string, StockPoint>([[stockKey('milk', 'K'), { onHandMilli: 4000, availableMilli: 4000 }]]);
+    return forecastStopListDetailed({
+      locations: new Map([[kitchen.id, kitchen]]),
+      products,
+      dishes: [dish('d1', 'Каша', [['milk', 0.5]])],
+      batches,
+      velocities: new Map([[stockKey('milk', 'K'), { perDay: 2, confidence: 1 }]]),
+      stock,
+      nowHour: 12,
+      incoming,
+      today: '2026-10-10',
+      ...extra,
+    });
+  };
+
+  it('без поставки блюдо остановится через двое суток (опорный случай)', () => {
+    const r = run([]);
+    expect(r.warnings).toHaveLength(1);
+    expect(r.warnings[0]?.hoursLeft).toBe(42);
+    expect(r.covered).toEqual([]);
+  });
+
+  it('поставка, которая успевает, снимает предупреждение и попадает в «выручит поставка»', () => {
+    const r = run([delivery()]);
+    expect(r.warnings).toEqual([]);
+    expect(r.covered).toHaveLength(1);
+    expect(r.covered[0]).toMatchObject({ dishName: 'Каша', hoursWithoutDelivery: 42 });
+    expect(r.covered[0]?.delivery.orderNumber).toBe('ЗК-000100');
+  });
+
+  it('поставка, которая не успевает, предупреждение не снимает и помечена как опоздавшая к остановке', () => {
+    // привезут через три дня, а блюдо встанет через двое суток
+    const r = run([delivery({ arrivesOn: '2026-10-13' })]);
+    expect(r.warnings[0]?.hoursLeft).toBe(42);
+    expect(r.warnings[0]?.incoming?.afterStop).toBe(true);
+    expect(r.warnings[0]?.incoming?.delivery.arrivesOn).toBe('2026-10-13');
+    expect(r.covered).toEqual([]);
+  });
+
+  it('малая поставка сдвигает остановку, но не отменяет её', () => {
+    const base = run([]).warnings[0]?.hoursLeft as number;
+    const r = run([delivery({ qtyMilli: 6000 })]);
+    const later = r.warnings[0]?.hoursLeft as number;
+    expect(later).toBeGreaterThan(base);
+    expect(r.warnings[0]?.incoming?.afterStop).toBe(false);
+    expect(r.covered).toEqual([]);
+  });
+
+  it('опоздавшая поставка (дата в прошлом) в расчёт не берётся', () => {
+    const r = run([delivery({ arrivesOn: '2026-10-08' })]);
+    expect(r.warnings).toHaveLength(1);
+    expect(r.warnings[0]?.hoursLeft).toBe(42);
+    expect(r.warnings[0]?.incoming).toBeNull();
+    expect(r.covered).toEqual([]);
+  });
+
+  it('у поставки короткий срок хранения: привезённое пропадёт, и блюдо всё равно встанет', () => {
+    // 20 кг с неограниченным сроком закрывают прогноз целиком, а те же 20 кг со сроком хранения сутки уже нет
+    expect(run([delivery({ shelfLifeDays: null })]).warnings).toEqual([]);
+    const r = run([delivery({ shelfLifeDays: 1 })]);
+    expect(r.warnings).toHaveLength(1);
+    expect(r.warnings[0]?.hoursLeft).toBeGreaterThan(42);
+    expect(r.covered).toEqual([]);
+  });
+
+  it('поставка не на ту точку или не того продукта ничего не меняет', () => {
+    const r = run([delivery({ productId: 'eggs' }), delivery({ locationId: 'S' })]);
+    expect(r.warnings).toHaveLength(1);
+    expect(r.warnings[0]?.hoursLeft).toBe(42);
+    expect(r.covered).toEqual([]);
+  });
+
+  it('без сегодняшней даты поставки игнорируются, прежнее поведение не меняется', () => {
+    const r = run([delivery()], undefined, { today: undefined });
+    expect(r.warnings).toHaveLength(1);
+    expect(r.covered).toEqual([]);
+  });
+
+  it('несколько поставок: ближайшая названа в предупреждении', () => {
+    const r = run([delivery({ orderId: 'o2', orderNumber: 'ЗК-000102', arrivesOn: '2026-10-14', qtyMilli: 1000 }), delivery({ orderId: 'o1', orderNumber: 'ЗК-000100', arrivesOn: '2026-10-12', qtyMilli: 1000 })]);
+    expect(r.warnings[0]?.incoming?.delivery.orderNumber).toBe('ЗК-000100');
   });
 });

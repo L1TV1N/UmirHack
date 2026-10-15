@@ -1,7 +1,7 @@
-import type { StopForecastDto, StopListDto, StopListEntryDto, StopReason } from '@zapas/shared';
+import { fromMilli, type IncomingInfoDto, type StopForecastCoveredDto, type StopForecastDto, type StopListDto, type StopListEntryDto, type StopReason } from '@zapas/shared';
 import { sql, type Transaction } from 'kysely';
 import { evaluateAutoStops, type AutoStop } from '../../domain/stoplist';
-import { forecastStopList } from '../../domain/stoplist-forecast';
+import { forecastStopListDetailed, type IncomingDelivery } from '../../domain/stoplist-forecast';
 import type { Db } from '../../db/client';
 import type { Database } from '../../db/types';
 import { hubFor } from '../../lib/events';
@@ -23,7 +23,7 @@ interface SyncResult extends Evaluation {
 // Срез не меняется после загрузки, поэтому оценку по нему делаем один раз
 const evaluated = new WeakMap<Snapshot, Evaluation>();
 
-function evaluate(snap: Snapshot): Evaluation {
+export function evaluate(snap: Snapshot): Evaluation {
   const known = evaluated.get(snap);
   if (known) return known;
   const result = evaluateAutoStops({
@@ -219,13 +219,48 @@ async function notifyNewStops(deps: Deps, reportable: AutoStop[]): Promise<void>
   }
 }
 
+/** Поставка в виде, который показывают человеку. */
+function incomingInfo(snap: Snapshot, d: IncomingDelivery, afterStop = false): IncomingInfoDto | null {
+  const product = snap.products.get(d.productId);
+  if (!product) return null;
+  return {
+    orderId: d.orderId,
+    orderNumber: d.orderNumber,
+    productId: d.productId,
+    productName: product.name,
+    unit: product.unit,
+    quantity: fromMilli(d.qtyMilli),
+    arrivesOn: d.arrivesOn,
+    ...(afterStop ? { afterStop: true } : {}),
+  };
+}
+
+/** Поставки в пути по этим продуктам на точку. Опоздавшие (дата в прошлом) не показываем: неизвестно, приедут ли они. */
+function incomingFor(snap: Snapshot, productIds: ReadonlySet<string>, locationId: string): IncomingInfoDto[] {
+  return snap.incoming
+    .filter((d) => d.locationId === locationId && productIds.has(d.productId) && d.arrivesOn >= snap.today)
+    .sort((a, b) => (a.arrivesOn < b.arrivesOn ? -1 : a.arrivesOn > b.arrivesOn ? 1 : a.orderNumber.localeCompare(b.orderNumber)))
+    .map((d) => incomingInfo(snap, d))
+    .filter((i): i is IncomingInfoDto => i !== null);
+}
+
+/** Продукты, которых не хватает у позиции стоп-листа: сама позиция или недостающие ингредиенты блюда. */
+function missingProducts(stop: AutoStop): Set<string> {
+  if (stop.entityType === 'product') return new Set([stop.entityId]);
+  const ids = new Set<string>();
+  for (const r of stop.reasons) for (const m of r.missing ?? []) ids.add(m.productId);
+  return ids;
+}
+
 /** Если срез шире нужного (например, у панели), передайте его: второй раз данные загружаться не будут. */
 export async function getStopList(deps: Deps, locationIds: string[] | null, wide?: Snapshot): Promise<StopListDto> {
   const snap = wide ? restrictSnapshot(wide, locationIds) : await getSnapshot(deps, locationIds);
   const { stops, warnings, since } = await syncStopList(deps, locationIds, snap);
   const now = deps.clock();
 
-  const entries: StopListEntryDto[] = stops.map((s) => ({
+  const entries: StopListEntryDto[] = stops.map((s) => {
+    const arriving = incomingFor(snap, missingProducts(s), s.locationId);
+    return {
     key: `auto:${stateKey(s)}`,
     entityType: s.entityType,
     entityId: s.entityId,
@@ -238,7 +273,9 @@ export async function getStopList(deps: Deps, locationIds: string[] | null, wide
     manualId: null,
     until: null,
     createdBy: null,
-  }));
+    ...(arriving.length > 0 ? { incoming: arriving } : {}),
+    };
+  });
 
   const scope = [...snap.locations.keys()];
   if (scope.length > 0) {
@@ -360,8 +397,7 @@ export async function drainStopListSync(deps: Deps): Promise<void> {
 }
 
 
-/** Когда блюда кухонь перестанут готовиться при текущих продажах. Блюда и продукты из стоп-листа пропускаются. */
-export async function getStopForecast(deps: Deps, principal: Principal, requestedLocation?: string): Promise<StopForecastDto[]> {
+async function runForecast(deps: Deps, principal: Principal, requestedLocation?: string) {
   const allowed = locationFilter(principal);
   if (requestedLocation) assertLocation(principal, requestedLocation);
   const scopeIds = requestedLocation ? [requestedLocation] : allowed;
@@ -369,8 +405,7 @@ export async function getStopForecast(deps: Deps, principal: Principal, requeste
   const current = await getStopList(deps, scopeIds, snap);
   const stopped = new Set(current.entries.filter((e) => e.entityType === 'dish').map((e) => `${e.entityId}|${e.locationId}`));
   const blockedProducts = new Set(current.entries.filter((e) => e.entityType === 'product').map((e) => `${e.entityId}|${e.locationId}`));
-  const now = deps.clock().getTime();
-  return forecastStopList({
+  const result = forecastStopListDetailed({
     locations: new Map([...snap.locations].filter(([id]) => !scopeIds || scopeIds.includes(id))),
     products: snap.products,
     dishes: snap.dishes,
@@ -380,5 +415,29 @@ export async function getStopForecast(deps: Deps, principal: Principal, requeste
     nowHour: businessHour(deps),
     stopped,
     blockedProducts,
-  }).map((f) => ({ ...f, expectedAt: new Date(now + f.hoursLeft * 3_600_000).toISOString() }));
+    incoming: snap.incoming,
+    today: snap.today,
+  });
+  return { snap, result };
+}
+
+/** Когда блюда кухонь перестанут готовиться при текущих продажах и с учётом поставок в пути. Блюда и продукты из стоп-листа пропускаются. */
+export async function getStopForecast(deps: Deps, principal: Principal, requestedLocation?: string): Promise<StopForecastDto[]> {
+  const { snap, result } = await runForecast(deps, principal, requestedLocation);
+  const now = deps.clock().getTime();
+  return result.warnings.map(({ incoming, ...f }) => {
+    const info = incoming ? incomingInfo(snap, incoming.delivery, incoming.afterStop) : null;
+    return { ...f, expectedAt: new Date(now + f.hoursLeft * 3_600_000).toISOString(), incoming: info };
+  });
+}
+
+/** Блюда, которым без поставки в пути грозил бы стоп, а с ней не грозит. */
+export async function getStopCovered(deps: Deps, principal: Principal, requestedLocation?: string): Promise<StopForecastCoveredDto[]> {
+  const { snap, result } = await runForecast(deps, principal, requestedLocation);
+  const out: StopForecastCoveredDto[] = [];
+  for (const c of result.covered) {
+    const info = incomingInfo(snap, c.delivery);
+    if (info) out.push({ dishId: c.dishId, dishName: c.dishName, locationId: c.locationId, locationName: c.locationName, hoursWithoutDelivery: c.hoursWithoutDelivery, incoming: info });
+  }
+  return out;
 }

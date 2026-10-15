@@ -10,6 +10,8 @@ import { HttpExchangeTransport } from './modules/exchange/transport';
 import { startExchangeWorker } from './modules/exchange/service';
 import { startForecastWorker } from './modules/forecast/service';
 import { OpenMeteoProvider } from './modules/forecast/weather';
+import { GigaChatApi } from './lib/gigachat';
+import { GigaChatPlanner } from './modules/assistant/planner';
 import { SmtpMailer } from './modules/orders/mailer';
 import { HttpTelegramApi } from './modules/telegram/api';
 import { TelegramBot } from './modules/telegram/bot';
@@ -30,12 +32,13 @@ const telegram = config.telegram?.commands ? new HttpTelegramApi(config.telegram
 // коды подтверждения входа отправляются с любого экземпляра, даже если опрос Telegram ведёт другой
 const codeSender = telegram ?? (config.telegram ? new HttpTelegramApi(config.telegram.token, telegramFetch) : null);
 const invoiceReader = config.invoicePhoto ? new GigaChatInvoiceReader(config.invoicePhoto) : null;
+const questionPlanner = config.invoicePhoto && config.assistantModel ? new GigaChatPlanner(new GigaChatApi({ ...config.invoicePhoto, model: config.assistantModel })) : null;
 const webhookSender = new HttpWebhookSender({ allowPrivate: config.webhooks.allowPrivate });
 const exchangeTransport = new HttpExchangeTransport({ allowHosts: config.exchange.allowHosts });
 const mailer = config.smtp ? new SmtpMailer(config.smtp.url, config.smtp.from) : null;
 const weather = config.weatherEnabled ? new OpenMeteoProvider() : null;
 const supplierPortal = config.supplierPortal ? new HttpSupplierPortal(config.supplierPortal.url, config.supplierPortal.secret, config.supplierPortal.publicUrl) : null;
-const base = { db: handle.db, config, clock: () => new Date(), notifier, telegram, codeSender, invoiceReader, webhookSender, exchangeTransport, mailer, weather, supplierPortal };
+const base = { db: handle.db, config, clock: () => new Date(), notifier, telegram, codeSender, invoiceReader, questionPlanner, webhookSender, exchangeTransport, mailer, weather, supplierPortal };
 const app = await buildApp(base);
 const runtime = { ...base, log: app.log };
 const stopScheduler = config.scheduler ? startScheduler(runtime) : () => undefined;

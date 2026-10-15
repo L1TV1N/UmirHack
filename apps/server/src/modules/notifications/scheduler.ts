@@ -8,6 +8,7 @@ import { autoDraftOrders } from '../orders/service';
 import { activeLocationIds, syncStopList } from '../stoplist/service';
 import { autoWriteoffExpired, describeAutoWriteoff } from '../stock/auto-writeoff';
 import { sendPersonalDigests } from '../telegram/delivery';
+import { purgeStorefront } from '../storefront/service';
 import { purgeExpiredCodes } from '../telegram/links';
 import { sendDigest } from './digest';
 
@@ -115,6 +116,7 @@ async function cleanup(deps: Deps): Promise<void> {
   await deps.db.deleteFrom('notification_log').where('sent_at', '<', logCutoff).execute();
   await deps.db.deleteFrom('webhook_deliveries').where('status', '<>', 'pending').where('created_at', '<', new Date(now.getTime() - 30 * 86_400_000)).execute();
   await purgeExpiredCodes(deps.db, deps.clock());
+  await purgeStorefront(deps);
 }
 
 export function startScheduler(deps: Deps): () => void {

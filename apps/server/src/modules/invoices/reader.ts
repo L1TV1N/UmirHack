@@ -1,7 +1,6 @@
-import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { Agent, FormData, fetch as undiciFetch } from 'undici';
+import { FormData } from 'undici';
 import { z } from 'zod';
+import { GigaChatApi, GIGACHAT_API_URL, type GigaChatOptions } from '../../lib/gigachat';
 import { toIsoDate, unitFrom, type RawInvoice } from './raw';
 
 /** Чтение накладной с фотографии. В тестах вместо настоящего чтения подставляется заглушка. */
@@ -47,91 +46,36 @@ const INSTRUCTION = [
   'expires_on: срок годности строки, если он указан. Если значения нет или оно не читается, ставь null и ничего не выдумывай.',
 ].join('\n');
 
-const AUTH_URL = 'https://ngw.devices.sberbank.ru:9443/api/v2/oauth';
-const API_URL = 'https://gigachat.devices.sberbank.ru/api/v1';
-
-export interface GigaChatOptions {
-  /** Ключ авторизации из личного кабинета (base64 от «идентификатор:секрет»). */
-  authKey: string;
-  scope: string;
-  model: string;
-  /** Путь к корневому сертификату Минцифры. Сертификаты Сбера в стандартное хранилище Node не входят. */
-  caFile?: string | null;
-  /** Крайняя мера для стендов: не проверять сертификат сервиса. */
-  insecureTls?: boolean;
-  fetchFn?: typeof undiciFetch;
-}
+export type { GigaChatOptions };
 
 /**
  * Распознавание накладной через GigaChat. Картинка уходит в сервис Сбера, мы её там же сразу удаляем,
  * у себя не храним и в журнал не пишем.
  */
 export class GigaChatInvoiceReader implements InvoiceReader {
-  private readonly fetchFn: typeof undiciFetch;
-  private readonly dispatcher: Agent | undefined;
-  private token: { value: string; expiresAt: number } | null = null;
+  private readonly api: GigaChatApi;
 
-  constructor(private readonly opts: GigaChatOptions) {
-    this.fetchFn = opts.fetchFn ?? undiciFetch;
-    if (opts.caFile || opts.insecureTls) {
-      this.dispatcher = new Agent({
-        connect: { ca: opts.caFile ? readFileSync(opts.caFile) : undefined, rejectUnauthorized: !opts.insecureTls },
-      });
-    }
-  }
-
-  private call(url: string, init: Record<string, unknown>) {
-    return this.fetchFn(url, { ...init, dispatcher: this.dispatcher, signal: AbortSignal.timeout(90_000) } as never);
-  }
-
-  /** Токен живёт около получаса: берём из кэша, а за минуту до конца просим новый. */
-  private async accessToken(): Promise<string> {
-    if (this.token && this.token.expiresAt - 60_000 > Date.now()) return this.token.value;
-    const res = await this.call(AUTH_URL, {
-      method: 'POST',
-      headers: {
-        Authorization: `Basic ${this.opts.authKey}`,
-        RqUID: randomUUID(),
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Accept: 'application/json',
-      },
-      body: new URLSearchParams({ scope: this.opts.scope }).toString(),
-    });
-    if (!res.ok) throw new Error(`GigaChat не дал токен (${res.status})`);
-    const data = (await res.json()) as { access_token?: string; expires_at?: number };
-    if (!data.access_token) throw new Error('GigaChat не дал токен');
-    this.token = { value: data.access_token, expiresAt: data.expires_at ?? Date.now() + 25 * 60_000 };
-    return this.token.value;
+  constructor(opts: GigaChatOptions) {
+    this.api = new GigaChatApi(opts);
   }
 
   async read(image: Buffer, mediaType: string): Promise<RawInvoice> {
-    const token = await this.accessToken();
-    const auth = { Authorization: `Bearer ${token}` };
+    const auth = await this.api.authHeaders();
 
     const form = new FormData();
     form.append('file', new Blob([new Uint8Array(image)], { type: mediaType }), 'invoice.' + (mediaType.split('/')[1] ?? 'jpg'));
     form.append('purpose', 'general');
-    const upload = await this.call(`${API_URL}/files`, { method: 'POST', headers: auth, body: form });
+    const upload = await this.api.call(`${GIGACHAT_API_URL}/files`, { method: 'POST', headers: auth, body: form });
     if (!upload.ok) throw new Error(`GigaChat не принял файл (${upload.status})`);
     const fileId = ((await upload.json()) as { id?: string }).id;
     if (!fileId) throw new Error('GigaChat не вернул идентификатор файла');
 
     try {
-      const res = await this.call(`${API_URL}/chat/completions`, {
-        method: 'POST',
-        headers: { ...auth, 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({
-          model: this.opts.model,
-          temperature: 0.1,
-          messages: [{ role: 'user', content: INSTRUCTION, attachments: [fileId] }],
-        }),
-      });
-      if (!res.ok) throw new Error(`GigaChat не ответил (${res.status})`);
-      const reply = ((await res.json()) as { choices?: { message?: { content?: string } }[] }).choices?.[0]?.message?.content ?? '';
+      const reply = await this.api.complete([{ role: 'user', content: INSTRUCTION, attachments: [fileId] }]);
       return this.toInvoice(this.parse(reply));
     } finally {
       // Файл на стороне сервиса нам больше не нужен. Не вышло удалить - не страшно, он приватный
-      this.call(`${API_URL}/files/${fileId}/delete`, { method: 'POST', headers: auth }).catch(() => undefined);
+      this.api.call(`${GIGACHAT_API_URL}/files/${fileId}/delete`, { method: 'POST', headers: auth }).catch(() => undefined);
     }
   }
 

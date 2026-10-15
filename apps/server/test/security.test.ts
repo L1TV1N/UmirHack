@@ -42,6 +42,8 @@ describe('матрица ролей', () => {
     { method: 'GET', url: '/api/settings', expect: { anon: 401, viewer: 200, keeper: 200, manager: 200, admin: 200 } },
     { method: 'GET', url: '/api/products', expect: { anon: 401, viewer: 200, keeper: 200, manager: 200, admin: 200 } },
     { method: 'GET', url: '/api/reports/stock.csv', expect: { anon: 401, viewer: 403, keeper: 403, manager: 200, admin: 200 } },
+    { method: 'GET', url: '/api/reports/rescued.csv', expect: { anon: 401, viewer: 403, keeper: 403, manager: 200, admin: 200 } },
+    { method: 'GET', url: '/api/reports/shortages.csv', expect: { anon: 401, viewer: 403, keeper: 403, manager: 200, admin: 200 } },
     { method: 'GET', url: '/api/analytics/dashboard', expect: { anon: 401, viewer: 200, keeper: 200, manager: 200, admin: 200 } },
     {
       method: 'POST',

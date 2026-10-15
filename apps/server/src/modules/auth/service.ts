@@ -1,11 +1,13 @@
 import {
   checkPassword,
   type ChangePasswordBody,
+  type EmailVerificationPendingDto,
   type LoginBody,
   type RegisterBody,
   type SessionDto,
   type TwoFactorChallengeDto,
   type TwoFactorVerifyBody,
+  type VerifyEmailBody,
 } from '@zapas/shared';
 import { sql, type Transaction } from 'kysely';
 import type { Db } from '../../db/client';
@@ -17,6 +19,7 @@ import { AppError, badRequest, conflict, PG_UNIQUE_VIOLATION, pgCode, unauthoriz
 import { dropTelegramAccess } from '../telegram/links';
 import { writeAudit } from '../audit/audit';
 import { loadLocationIds, loadUser, toUserDto, type UserRow } from '../users/users';
+import { confirmEmailCode, emailVerificationEnabled, needsEmailVerification, sendEmailCode } from './email-verification';
 import { burnVerify, hashPassword, verifyPassword } from './password';
 import { checkChallenge, createChallenge, needsSecondFactor, notifyUser, resendChallenge } from './two-factor';
 import { signAccessToken } from './tokens';
@@ -108,7 +111,7 @@ export interface TwoFactorPending {
   twoFactor: TwoFactorChallengeDto;
 }
 
-export async function login(deps: Deps, body: LoginBody, meta: RequestMeta): Promise<SessionResult | TwoFactorPending> {
+export async function login(deps: Deps, body: LoginBody, meta: RequestMeta): Promise<SessionResult | TwoFactorPending | EmailVerificationPendingDto> {
   const { db } = deps;
   const now = deps.clock();
   const user = await db.selectFrom('users').selectAll().where(sql<boolean>`lower(email) = ${body.email}`).executeTakeFirst();
@@ -143,6 +146,12 @@ export async function login(deps: Deps, body: LoginBody, meta: RequestMeta): Pro
     return fail('bad_password');
   }
 
+  // Почта ещё не подтверждена (самостоятельная регистрация): сессии нет, пока человек не введёт код из письма
+  if (needsEmailVerification(deps, user)) {
+    await writeAudit(db, { action: 'auth.email_unverified', entity: 'user', entityId: user.id, email: user.email, details: {}, meta, at: now });
+    return sendEmailCode(deps, user);
+  }
+
   // Пароль верен, но до подтверждения кодом сессию не выдаём и счётчик неудач не сбрасываем:
   // подбор кода считается теми же попытками, что и подбор пароля
   if (needsSecondFactor(user)) {
@@ -169,6 +178,24 @@ export async function login(deps: Deps, body: LoginBody, meta: RequestMeta): Pro
     at: now,
   });
   return result;
+}
+
+/** Подтверждение почты кодом из письма: после него выдаётся обычная сессия (или второй шаг входа, если он включён). */
+export async function verifyEmail(deps: Deps, body: VerifyEmailBody, meta: RequestMeta): Promise<SessionResult> {
+  const { db } = deps;
+  const now = deps.clock();
+  const result = await confirmEmailCode(deps, body.email, body.code);
+  if (!result.ok) {
+    await writeAudit(db, { action: 'auth.email_code_failed', email: body.email, details: { reason: result.reason }, meta, at: now });
+    if (result.reason === 'exhausted') throw unauthorized('Слишком много неверных кодов. Запросите новый.', 'code_exhausted');
+    if (result.reason === 'wrong') throw unauthorized(`Неверный код. Осталось попыток: ${result.attemptsLeft}`, 'invalid_code');
+    throw unauthorized('Код устарел или уже использован. Запросите новый.', 'invalid_code');
+  }
+  const refreshed = await db.updateTable('users').set({ failed_attempts: 0, locked_until: null, last_login_at: now }).where('id', '=', result.user.id).returningAll().executeTakeFirstOrThrow();
+  const locationIds = await loadLocationIds(db, refreshed.id);
+  const session = await issueSession(deps, db, refreshed, locationIds, crypto.randomUUID(), meta);
+  await writeAudit(db, { action: 'auth.email_verified', entity: 'user', entityId: refreshed.id, email: refreshed.email, details: {}, meta, at: now });
+  return session;
 }
 
 /** Второй шаг входа: код из Telegram или резервный код. */
@@ -216,8 +243,9 @@ export async function resendLoginCode(deps: Deps, challengeId: string, meta: Req
 }
 
 /** Новая организация и её первый администратор. Дальше он сам создаёт точки и приглашает сотрудников. */
-export async function register(deps: Deps, body: RegisterBody, meta: RequestMeta): Promise<SessionResult> {
+export async function register(deps: Deps, body: RegisterBody, meta: RequestMeta): Promise<SessionResult | EmailVerificationPendingDto> {
   const now = deps.clock();
+  const mustConfirm = emailVerificationEnabled(deps);
   const passwordHash = await hashPassword(body.password);
   try {
     const user = await deps.db.transaction().execute(async (trx) => {
@@ -230,8 +258,10 @@ export async function register(deps: Deps, body: RegisterBody, meta: RequestMeta
           full_name: body.fullName,
           password_hash: passwordHash,
           role: 'admin',
+          // без подтверждения почты вход возможен сразу, с ним только после ввода кода из письма
+          email_verified_at: mustConfirm ? null : now,
           locked_until: null,
-          last_login_at: now,
+          last_login_at: mustConfirm ? null : now,
           password_changed_at: now,
           created_at: now,
           updated_at: now,
@@ -249,6 +279,7 @@ export async function register(deps: Deps, body: RegisterBody, meta: RequestMeta
       });
       return created;
     });
+    if (mustConfirm) return await sendEmailCode(deps, user);
     return await issueSession(deps, deps.db, user, [], crypto.randomUUID(), meta);
   } catch (err) {
     if (pgCode(err) === PG_UNIQUE_VIOLATION) throw conflict('Пользователь с таким email уже есть', undefined, 'duplicate_email');

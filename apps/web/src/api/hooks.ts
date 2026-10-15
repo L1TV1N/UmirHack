@@ -29,6 +29,8 @@ export function useAction<TVars, TRes>(fn: (vars: TVars) => Promise<TRes>, inval
   const invalidateKeys = useInvalidate();
   return useMutation<TRes, ApiError, TVars>({
     mutationFn: fn,
+    // без связи запрос не должен вставать на паузу: документы сами решают, ставить ли себя в очередь
+    networkMode: 'always',
     onSuccess: () => {
       if (invalidate.length) void invalidateKeys(invalidate);
     },

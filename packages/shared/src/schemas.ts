@@ -102,6 +102,8 @@ export const createUserBody = z
     role: z.enum(ROLES),
     /** Без пароля система сама сгенерирует временный и потребует сменить его при первом входе. */
     password: password.optional(),
+    /** Отправить временный пароль письмом. По умолчанию отправляется, если на сервере настроена почта. */
+    sendInvite: z.boolean().optional(),
     locationIds: locationIds.default([]),
   })
   .superRefine((v, ctx) => {
@@ -118,6 +120,9 @@ export const updateUserBody = z.strictObject({
   locationIds: locationIds.optional(),
 });
 export type UpdateUserBody = z.infer<typeof updateUserBody>;
+
+export const temporaryPasswordBody = z.strictObject({ sendInvite: z.boolean().optional() });
+export type TemporaryPasswordBody = z.infer<typeof temporaryPasswordBody>;
 
 export const setPasswordBody = z.strictObject({ password });
 export type SetPasswordBody = z.infer<typeof setPasswordBody>;

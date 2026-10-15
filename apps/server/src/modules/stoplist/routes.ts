@@ -6,7 +6,7 @@ import { assertLocation, locationFilter } from '../../lib/scope';
 import { asUser, requireUser } from '../../plugins/access';
 import { writeAudit } from '../audit/audit';
 import { escapeHtml } from '../notifications/notifier';
-import { getStopForecast, getStopList, scheduleStopListSync } from './service';
+import { getStopCovered, getStopForecast, getStopList, scheduleStopListSync } from './service';
 
 export const stopListRoutes =
   (deps: Deps): FastifyPluginAsyncZod =>
@@ -18,6 +18,9 @@ export const stopListRoutes =
     );
 
     // Когда блюда перестанут готовиться при текущих продажах и без новых поставок
+    // Блюда, которым стоп не грозит только потому, что поставка уже едет
+    app.get('/stop-list/covered', { config: asUser(), schema: { querystring: locationScopeQuery } }, async (req) => getStopCovered(deps, requireUser(req), req.query.locationId));
+
     app.get('/stop-list/forecast', { config: asUser(), schema: { querystring: locationScopeQuery } }, async (req) =>
       getStopForecast(deps, requireUser(req), req.query.locationId),
     );

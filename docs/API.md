@@ -53,7 +53,9 @@ POST /api/auth/login
 | `POST /auth/refresh` | новый токен по cookie, cookie ротируется |
 | `POST /auth/logout` | закрыть сессию |
 | `GET /auth/me` | текущий пользователь |
-| `POST /auth/register` | `{ organizationName, fullName, email, password }`: новая организация и её администратор, сразу открывает сессию (201). 409 `duplicate_email` |
+| `POST /auth/register` | `{ organizationName, fullName, email, password }`: новая организация и её администратор, сразу открывает сессию (201). Если на сервере настроена почта, сессии нет: 202 `{ emailVerificationRequired: true, email, delivered, expiresIn, resendAfter }` и код на почту. 409 `duplicate_email` |
+| `POST /auth/verify-email` | `{ email, code }`: код из письма (шесть цифр), открывает сессию. 401 `invalid_code` (неверный, устаревший или уже использованный), 401 `code_exhausted` (пять неверных), 429 при частых попытках. Тот же ответ приходит на `POST /auth/login`, если почта ещё не подтверждена |
+| `POST /auth/verify-email/resend` | `{ email }`: новое письмо с кодом, не чаще раза в 30 секунд. Ответ `{ resendAfter }` одинаков для любого адреса |
 | `GET /auth/2fa` | любой вошедший: `{ eligible, botConfigured, telegramLinked, enabled, enabledAt, recoveryCodesLeft }` |
 | `POST /auth/2fa/start` | администратор: `{ purpose: enable \| disable \| recovery, password? }`, код уходит в Telegram, ответ `{ challengeId, delivered, expiresIn, resendAfter }`. Для `disable` и `recovery` нужен пароль. 409 `telegram_not_linked`, `telegram_not_configured`, `already_enabled`, `not_enabled`; 502 `telegram_unavailable` (включить нельзя, пока код не доставляется) |
 | `POST /auth/2fa/confirm` | администратор: `{ challengeId, code }`. Для `enable` и `recovery` в ответе `recoveryCodes` (восемь кодов, показываются один раз), для `disable` `{ enabled: false }` |
@@ -160,7 +162,17 @@ X-Api-Key: zk_…
 | `GET /haccp/inspections/pending`, `GET /haccp/inspections`, `POST /haccp/inspections` | бракераж: партии, ждущие осмотра (скоропорт и продукция с ВСД за три дня), журнал и запись осмотра `{ batchId, temperature?, appearanceOk, packagingOk, decision: accepted или rejected, comment? }`. Отказ сообщается в Telegram. 409 `already_inspected` |
 | `GET /reports/haccp.csv` | менеджер: журнал замеров за период для проверяющих |
 | `GET /events` | поток Server-Sent Events: событие `ready` при подключении и `changed`, когда данные изменились (без тела). Токен в заголовке `Authorization`, до пяти потоков на пользователя (429 `too_many_streams`), поток закрывается сервером через ~14 минут |
-| `GET /analytics/hot-dishes` | `{ asOf, locationId, items }`: горячие предложения, блюда кухонь по убыванию приоритета (до 30) с причинами по ингредиентам. Фильтр `locationId`. Первые пять также приходят в `hotDishes` ответа панели |
+| `GET /public/rescue`, `GET /public/rescue/:slug` | без входа: витрина «Спаси продукты» (все точки или одна по адресу): `{ venues: [{ slug, name, address, note, offers: [{ id, productName, unit, available, price, oldPrice, percent, expiresOn, daysLeft, perGuestMax }] }], holdMinutes }`. Кешируется на 15 секунд, 60 запросов в минуту с адреса |
+| `POST /public/rescue/reservations` | без входа: `{ offerId, quantity, name, phone, consent: true }` → 201 `{ code, expiresAt, venue, address, note, productName, unit, quantity, total }`. Поле `website` должно отсутствовать (ловушка для ботов). 404 `offer_unavailable`, 409 `not_enough`/`too_many`, 400 `bad_quantity`, 429 `too_many_reservations` (больше 3 действующих на телефон) и `venue_busy`; не больше `STOREFRONT_RESERVE_LIMIT` запросов с адреса за 10 минут |
+| `POST /public/rescue/reservations/cancel` | без входа: `{ code, phone }` → 204. Неверный код и чужой телефон дают одинаковый 404 |
+| `GET/PUT /storefront/settings` | менеджер: включение витрины на точке, адрес (`slug`), подсказка гостю. 409 `slug_taken` |
+| `GET /storefront/offers`, `POST /storefront/offers`, `POST /storefront/offers/:id/close` | список для кладовщика, выставить и снять для менеджера. Выставляется только уценённая партия на точке с включённой витриной: 409 `storefront_off`, `no_promotion`, `expired`, `too_much`, `already_offered` |
+| `GET /storefront/reservations` | кладовщик: брони по своим точкам, фильтры `locationId`, `code`. Имя и телефон видны, пока не стёрты по сроку хранения |
+| `POST /storefront/reservations/:id/pickup`, `POST /storefront/reservations/:id/cancel` | кладовщик: выдать (продажа со списанием, повтор безопасен) или отменить с причиной. 409 `reservation_expired`, `reservation_closed`, 422 `insufficient_stock` |
+| `GET /assistant/status` | `{ model, examples }`: разбирает ли вопросы GigaChat и примеры вопросов по роли |
+| `POST /assistant/ask` | `{ question, locationId? }` → `{ intent, planner, title, lines, link, suggestions }`. `planner`: `model`, `rules` или `none` (вопрос не понят). Только чтение; роль наблюдатель и выше, официанту 403. Ограничение `ASSISTANT_RATE_LIMIT` в минуту, 429 сверх него. Журнал: `assistant.ask` с запросом и разборщиком, без текста вопроса |
+| `POST /analytics/what-if` | кладовщик и выше: прогон решений в сухую. `{ locationId?, actions: [...] }`, до 10 шагов: `writeoff { batchId, quantity? }`, `receive { productId, locationId, quantity, shelfDays, unitCost? }`, `transfer { batchId, toLocationId, quantity? }`, `cook { dishId, locationId, portions }`, `demand { productId, locationId, factor }`. Ответ `{ persisted: false, steps, before, after, stopAdded, stopRemoved, hotBefore, hotAfter, notes }`. Ничего не пишет и кеш не сбрасывает. Шаг, который нельзя выполнить, возвращается с `ok: false` и причиной, остальные считаются. 429 при частоте выше 30 в минуту |
+| `GET /analytics/hot-dishes` | `{ asOf, locationId, items }`: горячие предложения, блюда кухонь по убыванию приоритета (до 30) с причинами по ингредиентам. Фильтр `locationId`. У блюда есть `margin` (маржа порции), `timeFit` (доля дневных продаж впереди) и `factors` (во сколько раз они сдвинули приоритет). Первые пять также приходят в `hotDishes` ответа панели |
 
 ## Приход по накладной
 
@@ -179,12 +191,12 @@ X-Api-Key: zk_…
 
 | Метод и адрес | Что делает |
 |---|---|
-| `POST /users` | администратор: `{ email, fullName, role, locationIds, password? }`. Роли: `admin`, `manager`, `storekeeper`, `viewer`, `waiter`. Без `password` создаётся временный: ответ `CreatedUserDto` с `temporaryPassword` (виден только здесь), у пользователя `mustChangePassword: true` |
+| `POST /users` | администратор: `{ email, fullName, role, locationIds, password?, sendInvite? }`. Роли: `admin`, `manager`, `storekeeper`, `viewer`, `waiter`. Без `password` создаётся временный: ответ `CreatedUserDto` с `temporaryPassword` (виден только здесь, и только если письмо не ушло или почта не настроена), `inviteSent`, `inviteError`; у пользователя `mustChangePassword: true`. `sendInvite: false` оставляет пароль на экране |
 | `POST /locations` | администратор: `{ code, name, kind, address? }`, `kind`: `warehouse`, `kitchen`, `shop`, `cafe`, `bar`. Заведение попадает в организацию автора |
 | `GET /waiter/menu?locationId` | меню заведения: блюда с ингредиентами, `stopped`, короткой причиной `stopNote` без количеств, пометкой `hot` |
 | `GET /waiter/hot-dishes?locationId` | только блюдо, цена, сколько порций предложить, приоритет |
 | `GET /waiter/stop-list?locationId` | что нельзя заказать и почему одной строкой |
-| `POST /guest-orders` | официант, менеджер, администратор: `{ locationId, tableLabel, comment?, lines: [{ dishId, quantity, note? }] }` → 201. 409 `dish_stopped`, 422 `not_a_kitchen`, 404 для чужого заведения |
+| `POST /guest-orders` | официант, менеджер, администратор: `{ locationId, tableLabel, comment?, placedAt?, lines: [{ dishId, quantity, note? }] }` → 201. Заголовок `Idempotency-Key`: тот же ключ того же официанта возвращает уже принятый заказ, а не создаёт второй. `placedAt`: когда заказ приняли без связи (не из будущего, не старше суток); в `GuestOrderDto.placedAt` и в ленте заказа. 409 `dish_stopped`, 422 `not_a_kitchen`, 404 для чужого заведения |
 | `GET /guest-orders?locationId&status&mine` | `status`: `new`, `in_progress`, `served`, `cancelled`, `open`, `all`. Официант видит только свои |
 | `GET /guest-orders/summary` | `{ open, incidents }` для счётчика в меню |
 | `GET /guest-orders/:id` | заказ со строками, обращениями и историей |
@@ -308,6 +320,7 @@ X-Api-Key: zk_…
 |---|---|
 | `GET /reports/stock.csv`, `/reports/writeoffs.csv`, `/reports/movements.csv` | менеджер |
 | `GET/POST /users`, `PATCH /users/:id`, `PUT /users/:id/password`, `POST /users/:id/unlock` | администратор |
+| `POST /users/:id/temporary-password` | администратор: `{ sendInvite? }`, новый временный пароль, сессии закрываются. Ответ `{ temporaryPassword, inviteSent, inviteError }`: пароль возвращается только если письмо не ушло |
 | `GET /telegram`, `POST /telegram/link-code`, `DELETE /telegram/link` | любой вошедший: статус привязки своего чата, одноразовый код привязки (`201`, действует 10 минут), отвязка |
 | `GET /locations` (все), `POST/PATCH /locations` | запись администратор |
 | `GET /settings` (все), `PUT /settings` | запись администратор. Помимо порогов: `useDemandModel` (поправка прогноза на день недели, праздники, погоду, акции) и `autoWriteoffExpired` (раз в сутки списывать просроченное от имени «Система») |

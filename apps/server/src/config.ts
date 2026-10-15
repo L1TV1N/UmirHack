@@ -33,6 +33,12 @@ const schema = z.object({
   WEB_DIST: z.string().optional(),
   RATE_LIMIT_MAX: z.coerce.number().int().min(10).max(100000).default(600),
   LOGIN_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(1000).default(10),
+  // Вопросов помощнику в минуту на пользователя
+  ASSISTANT_RATE_LIMIT: z.coerce.number().int().min(1).max(1000).default(20),
+  // Витрина «Спаси продукты»: сколько минут держится бронь, через сколько дней стираются имя и телефон гостя, броней с одного адреса за десять минут
+  STOREFRONT_HOLD_MINUTES: z.coerce.number().int().min(15).max(1440).default(120),
+  STOREFRONT_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(30),
+  STOREFRONT_RESERVE_LIMIT: z.coerce.number().int().min(1).max(1000).default(5),
   ENABLE_DOCS: bool.default(false),
   SCHEDULER: bool.optional(),
   CLUSTER_SYNC: bool.default(false),
@@ -65,6 +71,8 @@ const schema = z.object({
   GIGACHAT_AUTH_KEY: z.string().optional(),
   GIGACHAT_SCOPE: z.string().default('GIGACHAT_API_PERS'),
   INVOICE_MODEL: z.string().default('GigaChat-2-Max'),
+  // Модель помощника: только выбирает готовый запрос, поэтому хватает лёгкой. off - не использовать GigaChat для вопросов
+  ASSISTANT_MODEL: z.string().default('GigaChat-2'),
   // Сертификаты Сбера подписаны российским корневым, Node его не знает: дайте путь к файлу или отключите проверку
   GIGACHAT_CA_FILE: z.string().optional(),
   GIGACHAT_INSECURE_TLS: bool.default(false),
@@ -89,6 +97,8 @@ export interface Config {
   webDist: string | null;
   rateLimitMax: number;
   loginRateLimitMax: number;
+  assistantRateLimit: number;
+  storefront: { holdMinutes: number; retentionDays: number; reserveLimit: number };
   enableDocs: boolean;
   scheduler: boolean;
   /** Несколько экземпляров приложения: передавать сброс кеша и сигналы обновления через LISTEN/NOTIFY. */
@@ -100,6 +110,8 @@ export interface Config {
   /** Кабинет поставщика «Отгрузка». Нет: заказы остаются только в «Запасе». */
   supplierPortal: { url: string; secret: string; publicUrl: string } | null;
   invoicePhoto: { authKey: string; scope: string; model: string; caFile: string | null; insecureTls: boolean } | null;
+  /** Модель, которая разбирает вопросы помощника. null: только правила. */
+  assistantModel: string | null;
   webhooks: { allowPrivate: boolean; allowHttp: boolean };
   /** Хосты, которым разрешён обмен по http и во внутренней сети. */
   exchange: { allowHosts: string[] };
@@ -197,6 +209,8 @@ export function parseConfig(source: NodeJS.ProcessEnv = process.env): Config {
     webDist: e.WEB_DIST ?? null,
     rateLimitMax: e.RATE_LIMIT_MAX,
     loginRateLimitMax: e.LOGIN_RATE_LIMIT_MAX,
+    assistantRateLimit: e.ASSISTANT_RATE_LIMIT,
+    storefront: { holdMinutes: e.STOREFRONT_HOLD_MINUTES, retentionDays: e.STOREFRONT_RETENTION_DAYS, reserveLimit: e.STOREFRONT_RESERVE_LIMIT },
     enableDocs: e.ENABLE_DOCS && !production,
     scheduler: e.SCHEDULER ?? e.NODE_ENV !== 'test',
     clusterSync: e.CLUSTER_SYNC,
@@ -212,6 +226,7 @@ export function parseConfig(source: NodeJS.ProcessEnv = process.env): Config {
     invoicePhoto: e.GIGACHAT_AUTH_KEY
       ? { authKey: e.GIGACHAT_AUTH_KEY, scope: e.GIGACHAT_SCOPE, model: e.INVOICE_MODEL, caFile: e.GIGACHAT_CA_FILE || null, insecureTls: e.GIGACHAT_INSECURE_TLS }
       : null,
+    assistantModel: e.GIGACHAT_AUTH_KEY && e.ASSISTANT_MODEL !== 'off' ? e.ASSISTANT_MODEL : null,
     telegram:
       e.TELEGRAM_BOT_TOKEN && e.TELEGRAM_CHAT_ID
         ? { token: e.TELEGRAM_BOT_TOKEN, chatId: e.TELEGRAM_CHAT_ID, commands: e.TELEGRAM_COMMANDS ?? e.NODE_ENV !== 'test', proxy: e.TELEGRAM_PROXY_URL || null }

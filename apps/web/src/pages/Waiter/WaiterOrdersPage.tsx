@@ -16,6 +16,7 @@ import { AlertTriangle, X } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { post } from '../../api/client';
 import { useAction, useGet } from '../../api/hooks';
+import { useAuth } from '../../auth/AuthProvider';
 import { useScope } from '../../auth/ScopeProvider';
 import { Button } from '../../components/Button/Button';
 import type { Tone } from '../../components/Chip/Chip';
@@ -26,6 +27,9 @@ import { EmptyState, ErrorNote, Loading } from '../../components/Feedback/Feedba
 import { useToast } from '../../components/Toast/Toast';
 import { errorMessage } from '../../lib/errors';
 import { fmtDateTime } from '../../lib/format';
+import { flushOutbox, removeItem, retryItem, useOutbox } from '../../lib/outbox';
+import { useWaiterGet } from '../../lib/useWaiterGet';
+import { OfflineEmpty, OfflineNote } from './OfflineNote';
 import styles from './Waiter.module.scss';
 
 export const STATUS_TONE: Record<GuestOrderStatus, Tone> = { new: 'info', in_progress: 'amber', served: 'ok', cancelled: 'neutral' };
@@ -34,20 +38,47 @@ export const STATUS_TONE: Record<GuestOrderStatus, Tone> = { new: 'info', in_pro
 export default function WaiterOrdersPage() {
   const scope = useScope();
   const toast = useToast();
+  const { user } = useAuth();
   const locationId = scope.locationId;
-  const list = useGet<GuestOrderDto[]>('/guest-orders', { locationId, status: 'all', mine: '1' }, { enabled: Boolean(locationId), refetchInterval: 20_000 });
+  const queue = useOutbox(user?.id).filter((i) => i.path === '/guest-orders');
+  const list = useWaiterGet<GuestOrderDto[]>('/guest-orders', { locationId, status: 'all', mine: '1' }, { enabled: Boolean(locationId), refetchInterval: 20_000 });
   const [openId, setOpenId] = useState<string | null>(null);
   const detail = useGet<GuestOrderDetailDto>(`/guest-orders/${openId}`, undefined, { enabled: Boolean(openId) });
   const [incident, setIncident] = useState(false);
   const [cancel, setCancel] = useState(false);
 
-  if (list.isLoading) return <Loading label="Загружаем заказы" />;
-  if (list.error) return <ErrorNote error={list.error} onRetry={() => void list.refetch()} />;
+  if (list.unreachable && queue.length === 0) return <OfflineEmpty what="список заказов" />;
+  if (list.isLoading || (list.data === undefined && !list.error && queue.length === 0)) return <Loading label="Загружаем заказы" />;
+  if (list.error && queue.length === 0) return <ErrorNote error={list.error} onRetry={() => void list.refetch()} />;
   const orders = list.data ?? [];
 
   return (
     <>
-      {orders.length === 0 ? (
+      <OfflineNote savedAt={list.savedAt} />
+      {queue.length > 0 && (
+        <ul className={styles.queued} aria-label="Заказы, которые ещё не дошли до кухни">
+          {queue.map((item) => (
+            <li key={item.id} className={item.error ? styles.refused : ''}>
+              <div>
+                <strong>{item.label}</strong>
+                <small>Принят в {fmtDateTime(new Date(item.createdAt).toISOString())}</small>
+                <span>{item.error ? `Кухня не приняла: ${item.error}` : 'Ждёт связи, уйдёт на кухню сам'}</span>
+              </div>
+              {item.error ? (
+                <div style={{ flexDirection: 'row', gap: 6 }}>
+                  <Button size="sm" onClick={() => void retryItem(item.id).then(() => user && flushOutbox(user.id))}>
+                    Повторить
+                  </Button>
+                  <Button size="sm" variant="danger" onClick={() => void removeItem(item.id)}>
+                    Убрать
+                  </Button>
+                </div>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+      {orders.length === 0 && queue.length > 0 ? null : orders.length === 0 ? (
         <EmptyState title="Заказов пока нет">Принятые заказы появятся здесь, и вы увидите, когда кухня возьмёт их в работу.</EmptyState>
       ) : (
         <ul className={styles.orders}>
@@ -62,7 +93,7 @@ export default function WaiterOrdersPage() {
                 </span>
                 <span className={styles.orderLines}>{o.lines.map((l) => `${l.dishName} × ${l.quantity}${l.isRemake ? ' (переделка)' : ''}`).join(', ')}</span>
                 <span className={styles.orderFoot}>
-                  <span>{fmtDateTime(o.createdAt)}</span>
+                  <span>{fmtDateTime(o.placedAt ?? o.createdAt)}</span>
                   {o.openIncidents > 0 && (
                     <span className={styles.warnTag}>
                       <AlertTriangle size={13} aria-hidden="true" /> ждёт решения менеджера

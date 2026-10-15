@@ -16,6 +16,9 @@ import { adminRoutes } from './modules/admin/routes';
 import { invoiceRoutes } from './modules/invoices/routes';
 import { eventRoutes } from './modules/events/routes';
 import { guestOrderRoutes } from './modules/guest-orders/routes';
+import { assistantRoutes } from './modules/assistant/routes';
+import { storefrontRoutes } from './modules/storefront/routes';
+import { whatIfRoutes } from './modules/what-if/routes';
 import { supplierGatewayRoutes } from './modules/supplier-portal/routes';
 import { haccpRoutes } from './modules/haccp/routes';
 import { forecastRoutes } from './modules/forecast/routes';
@@ -54,7 +57,7 @@ const hopsTrust = (hops: number) => (_address: string, hop: number) => hop < hop
  * пользователя выбрасывал бы кеш всех организаций. Продажи с кассы кеш не сбрасывают намеренно: их стоп-лист
  * пересчитывается в фоне.
  */
-const KEEPS_CACHE = ['/api/pos/', '/api/auth/', '/api/telegram/', '/api/admin/cache/'];
+const KEEPS_CACHE = ['/api/pos/', '/api/auth/', '/api/telegram/', '/api/admin/cache/', '/api/analytics/what-if', '/api/assistant/', '/api/public/'];
 
 export async function buildApp(input: Omit<Deps, 'log'>): Promise<FastifyInstance> {
   useRussianErrors();
@@ -164,6 +167,9 @@ export async function buildApp(input: Omit<Deps, 'log'>): Promise<FastifyInstanc
       await api.register(eventRoutes(deps));
       await api.register(haccpRoutes(deps));
       await api.register(guestOrderRoutes(deps));
+      await api.register(whatIfRoutes(deps));
+      await api.register(assistantRoutes(deps));
+      await api.register(storefrontRoutes(deps));
       await api.register(supplierGatewayRoutes(deps));
     },
     { prefix: '/api' },

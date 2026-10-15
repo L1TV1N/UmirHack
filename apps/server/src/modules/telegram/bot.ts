@@ -2,7 +2,7 @@ import { hasForbiddenChars } from '@zapas/shared';
 import type { Deps } from '../../lib/context';
 import { executeAction, parseAction, prepareAction } from './actions';
 import type { Buttons, TelegramApi, TelegramCallbackQuery, TelegramMessage, TelegramUpdate } from './api';
-import { BUTTON_COMMANDS, greeting, HELP_TEXT, MAIN_MENU, MENU_COMMANDS, parseCommand, runCommand, type CommandContext } from './commands';
+import { askAssistant, BUTTON_COMMANDS, greeting, HELP_TEXT, MAIN_MENU, MENU_COMMANDS, parseCommand, runCommand, type CommandContext } from './commands';
 import { writeAudit } from '../audit/audit';
 import { denyChallenge } from '../auth/two-factor';
 import { isTopic, subscriptionsView, toggleTopic } from './subscriptions';
@@ -46,6 +46,7 @@ export class TelegramBot {
   private username = '';
   private readonly hits = new Map<number, number[]>();
   private readonly linkFails = new Map<number, { fails: number; until: number }>();
+  private readonly asked = new Map<number, number[]>();
   private readonly sleep: (ms: number, signal: AbortSignal) => Promise<void>;
 
   constructor(
@@ -75,6 +76,19 @@ export class TelegramBot {
       for (const [id, list] of this.hits) if (list.every((t) => now - t >= RATE_WINDOW_MS)) this.hits.delete(id);
     }
     return recent.length <= RATE_MAX;
+  }
+
+  /** Вопросы помощнику: не чаще десяти в минуту на чат, чтобы чат не нагружал разбор вопросов. */
+  private tooManyQuestions(chatId: number): boolean {
+    const now = this.deps.clock().getTime();
+    const recent = (this.asked.get(chatId) ?? []).filter((t) => now - t < 60_000);
+    if (recent.length >= 10) {
+      this.asked.set(chatId, recent);
+      return true;
+    }
+    recent.push(now);
+    this.asked.set(chatId, recent);
+    return false;
   }
 
   private async reply(chatId: number, text: string, buttons?: Buttons): Promise<void> {
@@ -191,7 +205,23 @@ export class TelegramBot {
     if (!cmd) {
       if (msg.text.trim().startsWith('/')) return; // команда другого бота
       const known = await principalOfChat(this.deps, chatId);
-      await this.reply(chatId, known && known !== 'inactive' ? 'Я понимаю команды. Список: /help' : CLOSED);
+      if (!known || known === 'inactive') {
+        await this.reply(chatId, CLOSED);
+        return;
+      }
+      // обычное сообщение от привязанного сотрудника считаем вопросом помощнику
+      if (known.principal.kind !== 'user') return;
+      if (this.tooManyQuestions(chatId)) {
+        await this.reply(chatId, 'Слишком много вопросов подряд. Подождите минуту.');
+        return;
+      }
+      try {
+        const out = await askAssistant({ deps: this.deps, principal: known.principal, user: known.row }, msg.text.replace(/\s+/g, ' ').trim());
+        await this.reply(chatId, out.text, out.buttons);
+      } catch (err) {
+        this.deps.log.error({ err: errorText(err) }, 'бот Telegram: вопрос не обработан');
+        await this.reply(chatId, 'Не удалось ответить. Попробуйте ещё раз чуть позже.');
+      }
       return;
     }
 
@@ -221,6 +251,10 @@ export class TelegramBot {
             ? 'Чат служит вторым фактором входа, поэтому отвязать его нельзя. Сначала отключите подтверждение входа в веб-интерфейсе.'
             : 'Чат отвязан. Чтобы подключить снова, получите новый код в веб-интерфейсе.',
         );
+        return;
+      }
+      if (cmd.name === 'ask' && this.tooManyQuestions(chatId)) {
+        await this.reply(chatId, 'Слишком много вопросов подряд. Подождите минуту.');
         return;
       }
       const out = await runCommand(ctx, cmd);

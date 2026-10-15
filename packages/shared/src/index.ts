@@ -16,3 +16,6 @@ export * from './haccp';
 export * from './exchange';
 export * from './platform';
 export * from './two-factor';
+export * from './whatif';
+export * from './assistant';
+export * from './storefront';

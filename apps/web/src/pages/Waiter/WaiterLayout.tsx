@@ -1,4 +1,4 @@
-import { LOCATION_KIND_LABELS } from '@zapas/shared';
+import { LOCATION_KIND_LABELS, type WaiterDishDto } from '@zapas/shared';
 import { ChefHat, ClipboardList, Flame, KeyRound, LogOut, MapPin, OctagonX, ShoppingBag } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router';
@@ -6,7 +6,11 @@ import { useAuth } from '../../auth/AuthProvider';
 import { useScope } from '../../auth/ScopeProvider';
 import { BrandMark } from '../../components/Layout/Brand';
 import { ChangePasswordDialog } from '../../components/Layout/ChangePasswordDialog';
+import { OfflineStatus } from '../../components/Layout/OfflineStatus';
 import { useLiveUpdates } from '../../lib/useLiveUpdates';
+import { useWaiterGet } from '../../lib/useWaiterGet';
+import { useStopAlerts } from '../../lib/useStopAlerts';
+import { StopAlerts } from './StopAlerts';
 import styles from './Waiter.module.scss';
 
 /** Рабочее место официанта: четыре вкладки, всё крупное и под палец. */
@@ -16,6 +20,9 @@ export default function WaiterLayout() {
   const navigate = useNavigate();
   const [passwordOpen, setPasswordOpen] = useState(false);
   useLiveUpdates();
+  // то же меню, что на экране заказа: запрос общий, лишней нагрузки нет
+  const menu = useWaiterGet<WaiterDishDto[]>('/waiter/menu', { locationId: scope.locationId ?? '' }, { enabled: Boolean(scope.locationId) });
+  const { alerts, dismiss } = useStopAlerts(menu.data);
 
   useEffect(() => {
     document.title = 'Официант - Запас';
@@ -42,6 +49,7 @@ export default function WaiterLayout() {
             <small>{scope.selected ? LOCATION_KIND_LABELS[scope.selected.kind] : ''}</small>
           </span>
         </button>
+        <OfflineStatus />
         <div className={styles.who}>
           <span>
             <ChefHat size={15} aria-hidden="true" />
@@ -55,6 +63,7 @@ export default function WaiterLayout() {
           </button>
         </div>
       </header>
+      <StopAlerts alerts={alerts} onDismiss={dismiss} />
       <main className={styles.content}>
         <Outlet />
       </main>

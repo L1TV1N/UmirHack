@@ -1,4 +1,4 @@
-import { registerBody } from '@zapas/shared';
+import { registerBody, type EmailVerificationPendingDto } from '@zapas/shared';
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, Navigate } from 'react-router';
 import { ApiError } from '../../api/client';
@@ -7,11 +7,13 @@ import { Button } from '../../components/Button/Button';
 import { Field, Input } from '../../components/Controls/Controls';
 import { BrandMark } from '../../components/Layout/Brand';
 import { TeamMark } from '../../components/TeamBanner/TeamMark';
+import { EmailCodeStep } from './EmailCodeStep';
 import styles from './LoginPage.module.scss';
 
 /** Регистрация организации: создаётся организация и её первый администратор, дальше он сам заводит заведения и сотрудников. */
 export default function RegisterPage() {
-  const { status, register } = useAuth();
+  const { status, register, verifyEmail, resendEmail } = useAuth();
+  const [mailCheck, setMailCheck] = useState<EmailVerificationPendingDto | null>(null);
   const [f, setF] = useState({ organizationName: '', fullName: '', email: '', password: '', repeat: '' });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -35,7 +37,8 @@ export default function RegisterPage() {
     setErrors({});
     setBusy(true);
     try {
-      await register(parsed.data);
+      const pending = await register(parsed.data);
+      if (pending) setMailCheck(pending);
     } catch (err) {
       setFormError(err instanceof ApiError ? (err.status === 429 ? 'Слишком много попыток. Подождите минуту.' : err.message) : 'Нет связи с сервером');
     } finally {
@@ -67,6 +70,14 @@ export default function RegisterPage() {
         </div>
       </section>
       <section className={styles.formSide}>
+        {mailCheck ? (
+          <EmailCodeStep
+            pending={mailCheck}
+            onVerify={(code) => verifyEmail(mailCheck.email, code)}
+            onResend={() => resendEmail(mailCheck.email)}
+            onBack={() => setMailCheck(null)}
+          />
+        ) : (
         <form className={styles.form} onSubmit={submit} noValidate>
           <h2>Новая организация</h2>
           <p>Укажите название и данные администратора.</p>
@@ -97,6 +108,7 @@ export default function RegisterPage() {
             Уже есть учётная запись? <Link to="/login">Войти</Link>
           </p>
         </form>
+        )}
       </section>
     </div>
   );

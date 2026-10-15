@@ -30,6 +30,10 @@ import {
   Truck,
   ConciergeBell,
   Repeat2,
+  UtensilsCrossed,
+  GitCompareArrows,
+  MessageCircleQuestion,
+  Store,
 } from 'lucide-react';
 import { lazy, Suspense, useEffect, useRef, useState, type ComponentType } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
@@ -43,6 +47,7 @@ import { TeamBanner } from '../TeamBanner/TeamBanner';
 import { useLiveUpdates } from '../../lib/useLiveUpdates';
 import { ChangePasswordDialog } from './ChangePasswordDialog';
 import { OfflineStatus } from './OfflineStatus';
+import { LiveBadge } from './LiveBadge';
 import { SecurityDialog } from './SecurityDialog';
 import { TelegramDialog } from './TelegramDialog';
 import { BrandMark } from './Brand';
@@ -68,6 +73,8 @@ export const GROUPS: { title: string; items: NavItem[] }[] = [
       { to: '/stock', label: 'Остатки', icon: Boxes },
       { to: '/operations', label: 'Операции', icon: ArrowLeftRight },
       { to: '/operations?tab=guest', label: 'Заявки гостей', icon: ConciergeBell, min: 'manager', tab: 'guest', badge: 'guest' },
+      { to: '/kitchen', label: 'Экран кухни', icon: UtensilsCrossed, min: 'manager' },
+      { to: '/storefront', label: 'Витрина', icon: Store, min: 'storekeeper' },
       { to: '/inventory', label: 'Инвентаризация', icon: ClipboardCheck },
       { to: '/traceability', label: 'Прослеживаемость', icon: FileCheck2, min: 'storekeeper' },
       { to: '/haccp', label: 'Журнал HACCP', icon: Thermometer },
@@ -79,6 +86,8 @@ export const GROUPS: { title: string; items: NavItem[] }[] = [
       { to: '/stop-list', label: 'Стоп-лист', icon: OctagonX },
       { to: '/hot-dishes', label: 'Горячие предложения', icon: Flame },
       { to: '/recommendations', label: 'Рекомендации', icon: Lightbulb },
+      { to: '/what-if', label: 'Что если', icon: GitCompareArrows, min: 'storekeeper' },
+      { to: '/assistant', label: 'Помощник', icon: MessageCircleQuestion },
       { to: '/orders', label: 'Заказы', icon: ShoppingCart, min: 'manager' },
       { to: '/suppliers', label: 'Поставщики', icon: Truck, min: 'manager' },
     ],
@@ -340,10 +349,7 @@ export function AppLayout() {
             <BookOpen size={16} aria-hidden="true" />
             <span>Руководство</span>
           </NavLink>
-          <span className={`${styles.live} ${live ? styles.liveOn : ''}`} title={live ? 'Данные обновляются сразу, как только что-то изменилось' : 'Живое обновление не подключено, данные обновляются раз в минуту'}>
-            <i aria-hidden="true" />
-            {live ? 'Обновляется сразу' : 'Без живого обновления'}
-          </span>
+          <LiveBadge live={live} />
           <span className={styles.today}>{fmtLongDate(new Date().toISOString())}</span>
           <UserMenu />
         </header>
